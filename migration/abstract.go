@@ -1,19 +1,12 @@
 package migration
 
 import (
-	"database/sql"
 	"fmt"
 )
 
 const (
 	TypeSQL  = iota
 	TypeFizz = iota
-	TypeGo   = iota
-)
-
-const (
-	StorageMemory = iota
-	StorageFile   = iota
 )
 
 var TypeMappings = map[string]uint8{
@@ -25,22 +18,29 @@ type Migration struct {
 	Version   string
 	Namespace string
 	Depends   []string
-	Type      uint8
-	Storage   uint8
 }
 
 func (m Migration) Revision() string {
 	return fmt.Sprintf("%s/%s", m.Namespace, m.Version)
 }
 
+func (m Migration) GetNamespace() string {
+	return m.Namespace
+}
+
 func (m *Migration) Dependencies() []string {
 	return m.Depends
 }
 
+func (m *Migration) SetDependencies() error {
+	return nil
+}
+
 type MigrationI interface {
-	UpFn(tx *sql.Tx) error
-	DownFn(tx *sql.Tx) error
-	Parse() error
+	UpScript() (string, uint8, error)
+	DownScript() (string, uint8, error)
+	SetDependencies() error
 	Revision() string
+	GetNamespace() string
 	Dependencies() []string
 }
