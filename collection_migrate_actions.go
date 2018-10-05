@@ -10,12 +10,12 @@ import (
 	"github.com/toudi/gorpheus/migration"
 )
 
-func (c *Collection) MigrateUp(tx *sqlx.Tx) error {
+func (c *Collection) MigrateUp(db *sqlx.DB) error {
 	// migrate towards latest version
-	return c.MigrateUpTo(tx, "")
+	return c.MigrateUpTo(db, "")
 }
 
-func (c *Collection) performMigrate(tx *sqlx.Tx, version string, direction uint8) error {
+func (c *Collection) performMigrate(db *sqlx.DB, version string, direction uint8) error {
 	sort.Sort(c.Versions)
 
 	// find the index of target version
@@ -50,7 +50,12 @@ func (c *Collection) performMigrate(tx *sqlx.Tx, version string, direction uint8
 		}
 
 		if !breakLoop {
+			tx, err := db.Beginx()
+			log.Debugf("begin() err = %v", err)
 			exists, err := c.Exists(tx, m.Revision())
+			log.Debugf("exists() err = %v", err)
+			err = tx.Commit()
+			log.Debugf("commit() err = %v", err)
 			if err != nil {
 				log.WithError(err).Errorf("Cannot check if %s exists.", m.Revision())
 				return err
@@ -60,13 +65,22 @@ func (c *Collection) performMigrate(tx *sqlx.Tx, version string, direction uint8
 				continue
 			}
 			log.Debugf("%s %s", operationDesc[direction], m.Revision())
+			tx, err = db.Beginx()
+			if err != nil {
+				log.WithError(err).Error("Cannot start transaction")
+				return err
+			}
 			if direction == DirectionUp {
 				// get UP script and it's type.
 				upScript, upType, err := m.UpScript()
 				if upType == migration.TypeFizz {
 					upScript, err = dialect.FizzDecode(upScript)
 				}
-				_, err = tx.Exec(upScript)
+				if upType == migration.TypeGo {
+					err = m.Up(tx)
+				} else {
+					_, err = tx.Exec(upScript)
+				}
 				if err == nil {
 					err = c.InsertRevision(tx, m.Revision())
 				}
@@ -75,6 +89,11 @@ func (c *Collection) performMigrate(tx *sqlx.Tx, version string, direction uint8
 				if downType == migration.TypeFizz {
 					downScript, err = dialect.FizzDecode(downScript)
 				}
+				if downType == migration.TypeGo {
+					err = m.Down(tx)
+				} else {
+					_, err = tx.Exec(downScript)
+				}
 				_, err = tx.Exec(downScript)
 				if err == nil {
 					err = c.RemoveRevision(tx, m.Revision())
@@ -82,7 +101,15 @@ func (c *Collection) performMigrate(tx *sqlx.Tx, version string, direction uint8
 			}
 			if err != nil {
 				log.WithError(err).Errorf("Error %s migration %s", operationDesc[direction], m.Revision())
+				err = tx.Rollback()
+
 				return err
+			} else {
+				err = tx.Commit()
+				if err != nil {
+					log.WithError(err).Error("Could not commit")
+					return err
+				}
 			}
 		} else {
 			break
@@ -92,14 +119,14 @@ func (c *Collection) performMigrate(tx *sqlx.Tx, version string, direction uint8
 	return nil
 
 }
-func (c *Collection) MigrateUpTo(tx *sqlx.Tx, version string) error {
+func (c *Collection) MigrateUpTo(db *sqlx.DB, version string) error {
 	log.Debugf("] MigrateUpTo::%v", version)
-	return c.performMigrate(tx, version, DirectionUp)
+	return c.performMigrate(db, version, DirectionUp)
 }
 
-func (c *Collection) MigrateDownTo(tx *sqlx.Tx, version string) error {
+func (c *Collection) MigrateDownTo(db *sqlx.DB, version string) error {
 	log.Debugf("] MigrateDownTo::%v", version)
-	return c.performMigrate(tx, version, DirectionDown)
+	return c.performMigrate(db, version, DirectionDown)
 }
 
 func (c *Collection) FindMigration(version string) (int, error) {

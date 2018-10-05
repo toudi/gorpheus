@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -86,4 +87,12 @@ func (f *FileMigration) DownScript() (string, uint8, error) {
 	// fileMigration has the type set based on file extension.
 	script, err := f.extractSection(tokenDown)
 	return script, f.getType(), err
+}
+
+func (f *FileMigration) Up(tx *sqlx.Tx) error {
+	return nil
+}
+
+func (f *FileMigration) Down(tx *sqlx.Tx) error {
+	return nil
 }

@@ -24,7 +24,7 @@ func (c *Collection) createTable(tx *sqlx.Tx) error {
 	var bubbler *fizz.Bubbler
 
 	if tx.DriverName() == "sqlite3" {
-		bubbler = fizz.NewBubbler(translators.NewSQLite("sqlite://example.sqlite3"))
+		bubbler = fizz.NewBubbler(translators.NewSQLite("sqlite://" + c.SQLiteDBName))
 	} else {
 		return errors.New("Unsupported driver")
 	}

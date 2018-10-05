@@ -16,7 +16,8 @@ const (
 type Migrations []migration.MigrationI
 
 type Collection struct {
-	Versions Migrations
+	Versions     Migrations
+	SQLiteDBName string
 }
 
 var NoSuchVersionErr = errors.New("No such migration")

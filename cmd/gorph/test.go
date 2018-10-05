@@ -19,6 +19,10 @@ type NewMigration struct {
 	migration.Migration
 }
 
+type NewMigration2 struct {
+	migration.GoMigration
+}
+
 var newMigration = &NewMigration{
 	Migration: migration.Migration{
 		Version:   "0003_inmem",
@@ -28,19 +32,44 @@ var newMigration = &NewMigration{
 }
 
 func (n *NewMigration) UpScript() (string, uint8, error) {
-	return `create_table("users_inmemory")`, migration.TypeFizz, nil
+	return `
+create_table("users_inmemory") {
+  t.Column("email", "string", {"null": true})
+}`, migration.TypeFizz, nil
 }
 
 func (n *NewMigration) DownScript() (string, uint8, error) {
 	return `DROP TABLE users_inmemory`, migration.TypeSQL, nil
 }
 
+var newMigration2 = &NewMigration2{
+	GoMigration: migration.GoMigration{
+		Migration: migration.Migration{
+			Version:   "0004_inmem",
+			Namespace: "users",
+			Depends:   []string{"users/0003_inmem"},
+		},
+	},
+}
+
+func (n2 *NewMigration2) Up(tx *sqlx.Tx) error {
+	_, err := tx.Exec("UPDATE users_inmemory SET email = ?;", "foo@bar.baz")
+	return err
+}
+
+func (n2 *NewMigration2) Down(tx *sqlx.Tx) error {
+	_, err := tx.Exec("UPDATE users_inmemory SET email = null;")
+	return err
+}
+
 func main() {
 	log.SetLevel(log.DebugLevel)
 	log.Debug("gorpheus started")
 	collection := gorpheus.Collection_init()
+	collection.SQLiteDBName = "example.sqlite"
 	storage.ScanDirectory("migrations", collection)
 	collection.Register(newMigration)
+	collection.Register(newMigration2)
 	log.Debugf("Original collection")
 	printCollection(collection)
 	collection.Sort()
@@ -48,21 +77,22 @@ func main() {
 	printCollection(collection)
 	// connect to db
 	db, _ := sqlx.Open("sqlite3", "./example.sqlite3")
-	tx := db.MustBegin()
+	// tx := db.MustBegin()
 	log.Debug("Migrating up")
-	err := collection.MigrateUp(tx)
+	err := collection.MigrateUp(db)
 	if err != nil {
 		log.WithError(err).Error("Cannot migrate up")
-		tx.Rollback()
-	} else {
-		tx.Commit()
+		// tx.Rollback()
 	}
-	log.Debugf("Migrating down")
-	tx = db.MustBegin()
-	err = collection.MigrateDownTo(tx, "users/0001")
-	if err != nil {
-		tx.Rollback()
-	} else {
-		tx.Commit()
-	}
+	// } else {
+	// 	tx.Commit()
+	// }
+	// log.Debugf("Migrating down")
+	// tx = db.MustBegin()
+	// err = collection.MigrateDownTo(db, "users/0003")
+	// if err != nil {
+	// 	tx.Rollback()
+	// } else {
+	// 	tx.Commit()
+	// }
 }

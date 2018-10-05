@@ -2,11 +2,14 @@ package migration
 
 import (
 	"fmt"
+
+	"github.com/jmoiron/sqlx"
 )
 
 const (
 	TypeSQL  = iota
 	TypeFizz = iota
+	TypeGo   = iota
 )
 
 var TypeMappings = map[string]uint8{
@@ -36,9 +39,19 @@ func (m *Migration) SetDependencies() error {
 	return nil
 }
 
+func (m *Migration) Up(tx *sqlx.Tx) error {
+	return nil
+}
+
+func (m *Migration) Down(tx *sqlx.Tx) error {
+	return nil
+}
+
 type MigrationI interface {
 	UpScript() (string, uint8, error)
 	DownScript() (string, uint8, error)
+	Up(tx *sqlx.Tx) error
+	Down(tx *sqlx.Tx) error
 	SetDependencies() error
 	Revision() string
 	GetNamespace() string
