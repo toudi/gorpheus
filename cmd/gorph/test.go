@@ -1,12 +1,13 @@
 package main
 
 import (
+	"github.com/gobuffalo/fizz/translators"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	log "github.com/sirupsen/logrus"
-	"github.com/toudi/gorpheus"
-	"github.com/toudi/gorpheus/migration"
-	"github.com/toudi/gorpheus/storage"
+	"github.com/toudi/gorpheus/v1"
+	"github.com/toudi/gorpheus/v1/migration"
+	"github.com/toudi/gorpheus/v1/storage"
 )
 
 func printCollection(c *gorpheus.Collection) {
@@ -66,7 +67,7 @@ func main() {
 	log.SetLevel(log.DebugLevel)
 	log.Debug("gorpheus started")
 	collection := gorpheus.Collection_init()
-	collection.SQLiteDBName = "example.sqlite"
+	collection.SetTranslator(translators.NewSQLite("sqlite:///example.sqlite"))
 	storage.ScanDirectory("migrations", collection)
 	collection.Register(newMigration)
 	collection.Register(newMigration2)

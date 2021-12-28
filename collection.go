@@ -4,8 +4,9 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/gobuffalo/fizz"
 	log "github.com/sirupsen/logrus"
-	"github.com/toudi/gorpheus/migration"
+	"github.com/toudi/gorpheus/v1/migration"
 )
 
 const (
@@ -16,16 +17,24 @@ const (
 type Migrations []migration.MigrationI
 
 type Collection struct {
-	Versions     Migrations
-	SQLiteDBName string
+	Versions       Migrations
+	FizzTranslator fizz.Translator
 }
 
-var NoSuchVersionErr = errors.New("No such migration")
+var ErrNoSuchVersion = errors.New("no such migration")
 
 func Collection_init() *Collection {
 	return &Collection{
 		Versions: make(Migrations, 0),
 	}
+}
+
+func (c *Collection) SetTranslator(translator fizz.Translator) {
+	c.FizzTranslator = translator
+}
+
+func (c *Collection) TranslatedSQL(sql string) (string, error) {
+	return fizz.NewBubbler(c.FizzTranslator).Bubble(sql)
 }
 
 func (c *Collection) Register(m migration.MigrationI) {

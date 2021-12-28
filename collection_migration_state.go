@@ -1,11 +1,8 @@
 package gorpheus
 
 import (
-	"errors"
 	"time"
 
-	"github.com/gobuffalo/fizz"
-	"github.com/gobuffalo/fizz/translators"
 	"github.com/jmoiron/sqlx"
 	log "github.com/sirupsen/logrus"
 )
@@ -21,15 +18,7 @@ const insertSQL = `INSERT INTO gorpheus_revisions (revision, created_at, updated
 const deleteSQL = `DELETE FROM gorpheus_revisions WHERE revision = ?`
 
 func (c *Collection) createTable(tx *sqlx.Tx) error {
-	var bubbler *fizz.Bubbler
-
-	if tx.DriverName() == "sqlite3" {
-		bubbler = fizz.NewBubbler(translators.NewSQLite("sqlite://" + c.SQLiteDBName))
-	} else {
-		return errors.New("Unsupported driver")
-	}
-
-	createSQL, err := bubbler.Bubble(createFizz)
+	createSQL, err := c.TranslatedSQL(createFizz)
 	if err != nil {
 		log.WithError(err).Error("Cannot translate fizz migration")
 		return err
