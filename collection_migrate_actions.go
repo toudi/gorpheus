@@ -1,146 +1,104 @@
 package gorpheus
 
 import (
+	"fmt"
+	"log"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-	log "github.com/sirupsen/logrus"
 	"github.com/toudi/gorpheus/v1/migration"
 )
 
-func (c *Collection) MigrateUp(db *sqlx.DB) error {
-	// migrate towards latest version
-	return c.MigrateUpTo(db, "")
-}
-
-func (c *Collection) performMigrate(db *sqlx.DB, version string, direction uint8) error {
-	sort.Sort(c.Versions)
-
-	// find the index of target version
-	var targetIdx int
-	var err error
+func (c *Collection) Migrate(params *MigrationParams) error {
 	var operationDesc = map[uint8]string{
 		DirectionUp:   "applying",
 		DirectionDown: "unapplying",
 	}
-	var breakLoop = false
-	var revIdx int
-	var m migration.MigrationI
 
-	var upScript, downScript string
-	var upType, downType uint8
+	var err error
+	var revision string
+	var db *sqlx.DB
 
-	if version == "" {
-		targetIdx = len(c.Versions)
-	} else {
-		targetIdx, err = c.FindMigration(version)
-		if err != nil {
-			log.Errorf("Cannot find target migration")
-			return err
-		}
+	sort.Sort(c.Versions)
+
+	// index of currently applied migration within revisions table
+	var currentIdx int
+	// index of target migration (i.e. the one that user wants to migrate to) within revisions table
+	var targetIdx int
+	// how many revisions should we apply - that's just for the internal forloop
+	var numRevisionsToApply int
+	var directionMode = DirectionUp
+	// this variable represents the position within revisions table during the internal for-loop.
+	var index int
+	// how much should the index change after each loop. that's +1 for migrating up, -1 for rolling back
+	var delta = 1
+
+	if db, err = c.connectToDb(params); err != nil {
+		log.Fatalf("unable to connect to the database: %v", err)
 	}
 
-	for idx := range c.Versions {
-		if direction == DirectionDown {
-			revIdx = len(c.Versions) - idx - 1
-			m = c.Versions[revIdx]
-			breakLoop = (revIdx <= targetIdx)
-		} else {
-			m = c.Versions[idx]
-			breakLoop = (idx >= targetIdx)
+	fmt.Printf("making sure that migrations table exist\n")
+	if err = c.ensureMigrationsTableExists(db); err != nil {
+		log.Fatalf("cannot create migrations table: %v", err)
+	}
+
+	// let's start by looking up the indices and based on that detect whether we are migrating or
+	// rolling back.
+	index = currentIdx
+
+	if revision, err = c.retrieveCurrentRevision(db); err != nil {
+		fmt.Printf("cannot detect current revision: %v", err)
+		// we don't really have to do anything since go assigns zero by default
+	}
+	if revision != "" {
+		if currentIdx, err = c.FindMigration(revision); err != nil {
+			log.Fatalf("cannot calculate index of current revision in revisions table: %v", err)
 		}
+		// so that we don't re-apply a migration that is currently on top.
+		index = currentIdx + 1
+	}
+	if targetIdx, err = c.FindMigrationWithNamespaceAndRevision(params.Namespace, params.Revision); err != nil {
+		log.Fatalf("cannot find target revision: %v", err)
+	}
 
-		if !breakLoop {
-			tx, err := db.Beginx()
-			log.Debugf("begin() err = %v", err)
-			exists, err := c.Exists(tx, m.Revision())
-			log.Debugf("exists() = %v err = %v", exists, err)
-			err = tx.Commit()
-			log.Debugf("commit() err = %v", err)
-			if err != nil {
-				log.WithError(err).Errorf("Cannot check if %s exists.", m.Revision())
-				return err
-			}
-			if exists && direction == DirectionUp {
-				log.Debugf("Skipping %s - already migrated", m.Revision())
-				continue
-			}
-			log.Debugf("%s %s", operationDesc[direction], m.Revision())
-			log.Infof("Revision begin()")
-			tx, err = db.Beginx()
-			if err != nil {
-				log.WithError(err).Error("Cannot start transaction")
-				return err
-			}
-			if direction == DirectionUp {
-				// get UP script and it's type.
-				if upScript, upType, err = m.UpScript(); err == nil {
-					if upType == migration.TypeFizz {
-						if upScript, err = c.TranslatedSQL(upScript); err != nil {
-							break
-						}
-					}
-					if upType == migration.TypeGo {
-						err = m.Up(tx)
-					} else {
-						_, err = tx.Exec(upScript)
-					}
-					if err == nil {
-						err = c.InsertRevision(tx, m.Revision())
-					}
-				}
-			} else {
-				if downScript, downType, err = m.DownScript(); err == nil {
-					if downType == migration.TypeFizz {
-						if downScript, err = c.TranslatedSQL(downScript); err != nil {
-							break
-						}
-					}
-					if downType == migration.TypeGo {
-						if err = m.Down(tx); err != nil {
-							break
-						}
-					} else {
-						if _, err = tx.Exec(downScript); err != nil {
-							break
-						}
-					}
-					_, err = tx.Exec(downScript)
-					if err == nil {
-						err = c.RemoveRevision(tx, m.Revision())
-					}
-				}
-			}
-			if err != nil {
-				log.WithError(err).Errorf("Error %s migration %s", operationDesc[direction], m.Revision())
-				err = tx.Rollback()
+	if targetIdx < currentIdx {
+		directionMode = DirectionDown
+		delta = -1
+		index -= 1
+	}
 
-				return err
-			} else {
-				log.Info("Revision commit()")
-				err = tx.Commit()
-				if err != nil {
-					log.WithError(err).Error("Could not commit")
-					return err
-				}
-			}
-		} else {
+	numRevisionsToApply = currentIdx - targetIdx
+	if numRevisionsToApply < 0 {
+		numRevisionsToApply = -numRevisionsToApply
+	}
+
+	if numRevisionsToApply == 0 {
+		fmt.Printf("no migrations to apply.\n")
+		return nil
+	}
+
+	fmt.Printf("currentIdx=%d, targetIdx=%d\n", currentIdx, targetIdx)
+	fmt.Printf("%s %d migration(s)\n", operationDesc[uint8(directionMode)], numRevisionsToApply)
+
+	for i := 0; i < numRevisionsToApply; i++ {
+		err = nil
+		fmt.Printf("%s %s .. ", operationDesc[uint8(directionMode)], c.Versions[index].Revision())
+
+		if err = Atomic(db, func(tx *sqlx.Tx) error {
+			return c.performMigration(tx, index, directionMode)
+		}); err != nil {
+			log.Fatalf("unable to perform operation: %v", err)
 			break
 		}
+		fmt.Printf("[OK]\n")
+
+		index += delta
 	}
 
 	return err
 
-}
-func (c *Collection) MigrateUpTo(db *sqlx.DB, version string) error {
-	log.Debugf("] MigrateUpTo::%v", version)
-	return c.performMigrate(db, version, DirectionUp)
-}
-
-func (c *Collection) MigrateDownTo(db *sqlx.DB, version string) error {
-	log.Debugf("] MigrateDownTo::%v", version)
-	return c.performMigrate(db, version, DirectionDown)
 }
 
 func (c *Collection) FindMigration(version string) (int, error) {
@@ -150,4 +108,73 @@ func (c *Collection) FindMigration(version string) (int, error) {
 		}
 	}
 	return -1, ErrNoSuchVersion
+}
+
+func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, revision int) (int, error) {
+	// if the namespace was not given then simply migrate to the latest available revision
+	if namespace == "" {
+		return len(c.Versions), nil
+	}
+	// this is a mode where we look for the specific revision within namespace
+	if revision > 0 {
+		fmt.Printf("namespace=%v, req ver=%v\n", namespace, revision)
+		for idx, m := range c.Versions {
+			revisionName := m.Revision()
+			fmt.Printf("has prefix? %v\n", strings.HasPrefix(revisionName, namespace))
+			if strings.HasPrefix(revisionName, namespace) {
+				// extract just the numeric part
+				underscoreIdx := strings.Index(revisionName, "_")
+				slashIdx := strings.Index(revisionName, "/")
+
+				fmt.Printf("parsing %v\n", revisionName[slashIdx+1:underscoreIdx])
+
+				versionNumberString := revisionName[slashIdx+1 : underscoreIdx]
+				versionNumber, err := strconv.Atoi(versionNumberString)
+				if err != nil {
+					return -1, fmt.Errorf("unable to parse the numeric revision: %v", err)
+				}
+				if versionNumber == revision {
+					return idx, nil
+				}
+			}
+		}
+	}
+
+	return -1, ErrNoSuchVersion
+}
+
+func (c *Collection) performMigration(tx *sqlx.Tx, idx int, direction int) error {
+	var script string
+	var scriptType uint8
+	var err error
+
+	_migration := c.Versions[idx]
+
+	if direction == DirectionUp {
+		script, scriptType, err = _migration.UpScript()
+	} else {
+		script, scriptType, err = _migration.DownScript()
+	}
+
+	if err != nil {
+		return fmt.Errorf("unable to obtain migration script: %v", err)
+	}
+
+	if scriptType == migration.TypeFizz {
+		if script, err = c.TranslatedSQL(script); err != nil {
+			return fmt.Errorf("cannot translate migration script: %v", err)
+		}
+	}
+	if scriptType == migration.TypeGo {
+		err = _migration.Up(tx)
+	} else {
+		_, err = tx.Exec(script)
+	}
+	if err == nil {
+		if direction == DirectionUp {
+			return c.InsertRevision(tx, _migration.Revision())
+		}
+		return c.RemoveRevision(tx, _migration.Revision())
+	}
+	return err
 }

@@ -2,16 +2,13 @@ package gorpheus
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/gobuffalo/fizz"
+	"github.com/jmoiron/sqlx"
 	log "github.com/sirupsen/logrus"
 	"github.com/toudi/gorpheus/v1/migration"
-)
-
-const (
-	DirectionUp   = iota
-	DirectionDown = iota
 )
 
 type Migrations []migration.MigrationI
@@ -19,17 +16,20 @@ type Migrations []migration.MigrationI
 type Collection struct {
 	Versions       Migrations
 	FizzTranslator fizz.Translator
+	SQLBindType    int
 }
 
 var ErrNoSuchVersion = errors.New("no such migration")
 
 func Collection_init() *Collection {
 	return &Collection{
-		Versions: make(Migrations, 0),
+		Versions:    make(Migrations, 0),
+		SQLBindType: sqlx.UNKNOWN,
 	}
 }
 
 func (c *Collection) SetTranslator(translator fizz.Translator) {
+	fmt.Printf("set translator to %v", translator)
 	c.FizzTranslator = translator
 }
 
