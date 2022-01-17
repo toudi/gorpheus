@@ -30,8 +30,6 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	// how many revisions should we apply - that's just for the internal forloop
 	var numRevisionsToApply int
 	var directionMode = DirectionUp
-	// this variable represents the position within revisions table during the internal for-loop.
-	var index int
 	// how much should the index change after each loop. that's +1 for migrating up, -1 for rolling back
 	var delta = 1
 
@@ -46,7 +44,6 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 
 	// let's start by looking up the indices and based on that detect whether we are migrating or
 	// rolling back.
-	index = currentIdx
 
 	if revision, err = c.retrieveCurrentRevision(db); err != nil {
 		fmt.Printf("cannot detect current revision: %v", err)
@@ -56,45 +53,53 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		if currentIdx, err = c.FindMigration(revision); err != nil {
 			log.Fatalf("cannot calculate index of current revision in revisions table: %v", err)
 		}
-		// so that we don't re-apply a migration that is currently on top.
-		index = currentIdx + 1
 	}
 	if targetIdx, err = c.FindMigrationWithNamespaceAndRevision(params.Namespace, params.Revision); err != nil {
 		log.Fatalf("cannot find target revision: %v", err)
 	}
-
-	if targetIdx < currentIdx {
-		directionMode = DirectionDown
-		delta = -1
-		index -= 1
+	if params.Zero {
+		targetIdx = 0
 	}
 
-	numRevisionsToApply = currentIdx - targetIdx
-	if numRevisionsToApply < 0 {
-		numRevisionsToApply = -numRevisionsToApply
-	}
-
-	if numRevisionsToApply == 0 {
+	if currentIdx == targetIdx {
 		fmt.Printf("no migrations to apply.\n")
 		return nil
 	}
+
+	if targetIdx < currentIdx {
+		directionMode = DirectionDown
+		targetIdx += 1
+		delta = -1
+	} else {
+		currentIdx += 1
+	}
+
+	numRevisionsToApply = (currentIdx - targetIdx)
+	if numRevisionsToApply < 0 {
+		numRevisionsToApply = -numRevisionsToApply
+	}
+	numRevisionsToApply += 1
 
 	fmt.Printf("currentIdx=%d, targetIdx=%d\n", currentIdx, targetIdx)
 	fmt.Printf("%s %d migration(s)\n", operationDesc[uint8(directionMode)], numRevisionsToApply)
 
 	for i := 0; i < numRevisionsToApply; i++ {
 		err = nil
-		fmt.Printf("%s %s .. ", operationDesc[uint8(directionMode)], c.Versions[index].Revision())
+		fmt.Printf("%s %s .. ", operationDesc[uint8(directionMode)], c.Versions[currentIdx].Revision())
 
 		if err = Atomic(db, func(tx *sqlx.Tx) error {
-			return c.performMigration(tx, index, directionMode)
+			return c.performMigration(tx, currentIdx, directionMode)
 		}); err != nil {
 			log.Fatalf("unable to perform operation: %v", err)
 			break
 		}
 		fmt.Printf("[OK]\n")
 
-		index += delta
+		currentIdx += delta
+	}
+
+	if params.Zero {
+		err = c.dropMigrationsTable(db)
 	}
 
 	return err
@@ -113,20 +118,17 @@ func (c *Collection) FindMigration(version string) (int, error) {
 func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, revision int) (int, error) {
 	// if the namespace was not given then simply migrate to the latest available revision
 	if namespace == "" {
-		return len(c.Versions), nil
+		return len(c.Versions) - 1, nil
 	}
 	// this is a mode where we look for the specific revision within namespace
 	if revision > 0 {
-		fmt.Printf("namespace=%v, req ver=%v\n", namespace, revision)
 		for idx, m := range c.Versions {
 			revisionName := m.Revision()
-			fmt.Printf("has prefix? %v\n", strings.HasPrefix(revisionName, namespace))
+
 			if strings.HasPrefix(revisionName, namespace) {
 				// extract just the numeric part
 				underscoreIdx := strings.Index(revisionName, "_")
 				slashIdx := strings.Index(revisionName, "/")
-
-				fmt.Printf("parsing %v\n", revisionName[slashIdx+1:underscoreIdx])
 
 				versionNumberString := revisionName[slashIdx+1 : underscoreIdx]
 				versionNumber, err := strconv.Atoi(versionNumberString)

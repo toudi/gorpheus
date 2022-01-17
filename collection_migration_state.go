@@ -15,6 +15,7 @@ create_table("gorpheus_revisions") {
 	t.DisableTimestamps()
 }
 `
+const dropRevisionsTable = `DROP TABLE gorpheus_revisions`
 
 const findRevisionSQL = `SELECT COUNT(1) FROM gorpheus_revisions WHERE revision = ?`
 const insertRevisionSQL = `INSERT INTO gorpheus_revisions (revision, applied) VALUES (?, ?)`
@@ -51,6 +52,11 @@ func (c *Collection) createMigrationsTable(tx *sqlx.Tx) error {
 	return err
 }
 
+func (c *Collection) dropMigrationsTable(db *sqlx.DB) error {
+	_, err := db.Exec(dropRevisionsTable)
+	return err
+}
+
 func (c *Collection) Exists(tx *sqlx.Tx, revision string) (bool, error) {
 	var result uint8
 	err := tx.Get(&result, tx.Rebind(findRevisionSQL), revision)
@@ -59,13 +65,11 @@ func (c *Collection) Exists(tx *sqlx.Tx, revision string) (bool, error) {
 
 func (c *Collection) InsertRevision(tx *sqlx.Tx, revision string) error {
 	_, err := tx.Exec(tx.Rebind(insertRevisionSQL), revision, time.Now())
-	fmt.Printf("%s -> %v\n", insertRevisionSQL, err)
 	return err
 }
 
 func (c *Collection) RemoveRevision(tx *sqlx.Tx, revision string) error {
 	_, err := tx.Exec(tx.Rebind(deleteRevisionSQL), revision)
-	fmt.Printf("%s -> %v\n", deleteRevisionSQL, err)
 	return err
 }
 
