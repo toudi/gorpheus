@@ -24,7 +24,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	sort.Sort(c.Versions)
 
 	// index of currently applied migration within revisions table
-	var currentIdx int
+	var currentIdx int = -1
 	// index of target migration (i.e. the one that user wants to migrate to) within revisions table
 	var targetIdx int
 	// how many revisions should we apply - that's just for the internal forloop
@@ -58,7 +58,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		log.Fatalf("cannot find target revision: %v", err)
 	}
 	if params.Zero {
-		targetIdx = 0
+		targetIdx = -1
 	}
 
 	if currentIdx == targetIdx {
