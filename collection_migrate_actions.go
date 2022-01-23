@@ -31,6 +31,10 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		log.Fatalf("cannot create migrations table: %v", err)
 	}
 
+	if params.DropRevisionsTable {
+		return c.dropMigrationsTable(db)
+	}
+
 	// check which versions are applied in the database and index the existing collection
 	c.index(db)
 
@@ -55,7 +59,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 			if !params.Zero {
 				params.VersionNo = namespaceMeta.mostRecent
 			} else {
-				breakpoint = fmt.Sprintf("%s/unapply-all", params.Namespace)
+				breakpoint = c.Versions[namespaceMeta.positionIndex[1]].Revision()
 			}
 		}
 		var migrationIndex int
@@ -80,7 +84,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 
 	err = Atomic(db, func(tx *sqlx.Tx) error {
 		for _, _migration := range migrationsToApply {
-			if _, err = c.performMigration(tx, _migration, direction, breakpoint); err != nil {
+			if _, err = c.performMigration(tx, _migration, direction, breakpoint, 0); err != nil {
 				return fmt.Errorf("could not %s %s: %v", description[:len(description)-3], _migration.Revision(), err)
 			}
 		}
@@ -133,14 +137,14 @@ func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, rev
 	return -1, ErrNoSuchVersion
 }
 
-func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, breakpoint string) (bool, error) {
+func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, breakpoint string, indent int) (bool, error) {
 	var script string
 	var scriptType uint8
 	var err error
 	var breakpointReached bool
 	var performAction bool = true
 
-	fmt.Printf("performMigration(%s, %d, %s)\n", _migration.Revision(), direction, breakpoint)
+	fmt.Printf("%s performMigration(%s, %d, %s)\n", strings.Repeat(" ", indent), _migration.Revision(), direction, breakpoint)
 
 	dependenciesArray, err := c.GetDependencies(_migration)
 	// fmt.Printf("result of getDependencies(%s): %v, %v\n", _migration.Revision(), dependenciesArray, err)
@@ -151,10 +155,12 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 	// migration
 	if direction == DirectionUp {
 		for _, dependency := range dependenciesArray {
-			// fmt.Printf("call c.performMigration(%+v)\n", dependency)
-			if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint); breakpointReached || err != nil {
-				fmt.Printf("returning since breakpointReached=%v; err=%v\n", breakpointReached, err)
-				return breakpointReached, err
+			if _, exists := c.applied[dependency.Revision()]; !exists {
+				// fmt.Printf("call c.performMigration(%+v)\n", dependency)
+				if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, indent+1); breakpointReached || err != nil {
+					fmt.Printf("%s returning since breakpointReached=%v; err=%v\n", strings.Repeat(" ", indent), breakpointReached, err)
+					return breakpointReached, err
+				}
 			}
 		}
 	}
@@ -166,12 +172,12 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 	// also, if we're migrating downwards and the migrations was not applied then there's no point
 	// in unapplying it.
 	if (direction == DirectionUp && exists) || (!exists && direction == DirectionDown) {
-		fmt.Printf("no-op\n")
+		fmt.Printf("%s no-op\n", strings.Repeat(" ", indent))
 		performAction = false
 	}
 
 	if performAction {
-		fmt.Printf("%s %s\n", operationDesc[uint8(direction)], _migration.Revision())
+		fmt.Printf("%s %s %s\n", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.Revision())
 
 		if direction == DirectionUp {
 			script, scriptType, err = _migration.UpScript()
@@ -197,25 +203,28 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 
 	if err == nil {
 		breakpointReached = _migration.Revision() == breakpoint
-		fmt.Printf("breakpointReached=%v\n", breakpointReached)
+		fmt.Printf("%s breakpointReached=%v\n", strings.Repeat(" ", indent), breakpointReached)
 		if direction == DirectionUp {
-			return breakpointReached, c.InsertRevision(tx, _migration.Revision())
-		}
-		// https://stackoverflow.com/questions/28058278/how-do-i-reverse-a-slice-in-go
-		for i, j := 0, len(dependenciesArray)-1; i < j; i, j = i+1, j-1 {
-			dependenciesArray[i], dependenciesArray[j] = dependenciesArray[j], dependenciesArray[i]
-		}
-		if !breakpointReached {
-			fmt.Printf("dependencies for %s => %v\n", _migration.Revision(), dependenciesArray)
-			for _, dependency := range dependenciesArray {
-				fmt.Printf("call c.performMigration(%+v)\n", dependency)
-				if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint); breakpointReached || err != nil {
-					fmt.Printf("returning since breakpointReached=%v; err=%v\n", breakpointReached, err)
-					return breakpointReached, err
+			err = c.InsertRevision(tx, _migration.Revision())
+		} else {
+			err = c.RemoveRevision(tx, _migration.Revision())
+			if err == nil {
+				if !breakpointReached {
+					// https://stackoverflow.com/questions/28058278/how-do-i-reverse-a-slice-in-go
+					for i, j := 0, len(dependenciesArray)-1; i < j; i, j = i+1, j-1 {
+						dependenciesArray[i], dependenciesArray[j] = dependenciesArray[j], dependenciesArray[i]
+					}
+					fmt.Printf("%s dependencies for %s => %v\n", strings.Repeat(" ", indent), _migration.Revision(), dependenciesArray)
+					for _, dependency := range dependenciesArray {
+						fmt.Printf("%s call c.performMigration(%+v)\n", strings.Repeat(" ", indent), dependency)
+						if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, indent+1); breakpointReached || err != nil {
+							fmt.Printf("%s returning since breakpointReached=%v; err=%v\n", strings.Repeat(" ", indent), breakpointReached, err)
+							return breakpointReached, err
+						}
+					}
 				}
 			}
 		}
-		return breakpointReached, c.RemoveRevision(tx, _migration.Revision())
 	}
-	return false, err
+	return breakpointReached, err
 }

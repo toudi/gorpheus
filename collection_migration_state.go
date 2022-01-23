@@ -64,17 +64,19 @@ func (c *Collection) Exists(tx *sqlx.Tx, revision string) (bool, error) {
 }
 
 func (c *Collection) InsertRevision(tx *sqlx.Tx, revision string) error {
-	_, err := tx.Exec(tx.Rebind(insertRevisionSQL), revision, time.Now())
-	if err == nil {
+	if _, exist := c.applied[revision]; !exist {
+		_, err := tx.Exec(tx.Rebind(insertRevisionSQL), revision, time.Now())
 		c.applied[revision] = true
+		return err
 	}
-	return err
+	return nil
 }
 
 func (c *Collection) RemoveRevision(tx *sqlx.Tx, revision string) error {
-	_, err := tx.Exec(tx.Rebind(deleteRevisionSQL), revision)
-	if err == nil {
+	if _, exist := c.applied[revision]; exist {
+		_, err := tx.Exec(tx.Rebind(deleteRevisionSQL), revision)
 		delete(c.applied, revision)
+		return err
 	}
-	return err
+	return nil
 }

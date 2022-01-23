@@ -21,4 +21,6 @@ type MigrationParams struct {
 	VersionNo int
 	// mode of operation - either Up (migrate) or Down (rollback)
 	Direction int
+	// if set, gorpheus will clean the migrations table from the database
+	DropRevisionsTable bool
 }
