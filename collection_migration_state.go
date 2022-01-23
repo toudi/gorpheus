@@ -65,16 +65,16 @@ func (c *Collection) Exists(tx *sqlx.Tx, revision string) (bool, error) {
 
 func (c *Collection) InsertRevision(tx *sqlx.Tx, revision string) error {
 	_, err := tx.Exec(tx.Rebind(insertRevisionSQL), revision, time.Now())
+	if err == nil {
+		c.applied[revision] = true
+	}
 	return err
 }
 
 func (c *Collection) RemoveRevision(tx *sqlx.Tx, revision string) error {
 	_, err := tx.Exec(tx.Rebind(deleteRevisionSQL), revision)
+	if err == nil {
+		delete(c.applied, revision)
+	}
 	return err
-}
-
-func (c *Collection) retrieveCurrentRevision(db *sqlx.DB) (string, error) {
-	var latestRevision string
-	err := db.Get(&latestRevision, "SELECT revision FROM gorpheus_revisions ORDER BY applied DESC limit 1")
-	return latestRevision, err
 }

@@ -74,23 +74,6 @@ func (n2 *NewMigration2) Down(tx *sqlx.Tx) error {
 	return err
 }
 
-func parseNamespaceAndRevision(flagset *flag.FlagSet, dest *gorpheus.MigrationParams) error {
-	var err error
-
-	if flagset.NArg() >= 1 {
-		// if there are any positional arguments, the first one is expected to be the namespace
-		dest.Namespace = flagset.Arg(0)
-		if flagset.NArg() == 2 {
-			// if there is a second positional argument, it will be the desired revision within namespace
-			if dest.Revision, err = strconv.Atoi(flagset.Arg(1)); err != nil {
-				return fmt.Errorf("unable to parse revision: %v", err)
-			}
-		}
-	}
-
-	return nil
-}
-
 func main() {
 	var err error
 
@@ -98,7 +81,6 @@ func main() {
 
 	flag.StringVar(&params.EnvKeyName, "env", "DATABASE_URL", "Environment variable that will contain database url")
 	flag.BoolVar(&params.Fake, "fake", false, "This option is only meaningful if combined with namespace and target revision. Then, if set, it pretends that a migration was applied.")
-	flag.BoolVar(&params.Zero, "zero", false, "Unnapply all migrations, including gorpheus_migrations table")
 
 	flag.Parse()
 
@@ -108,9 +90,13 @@ func main() {
 		fmt.Println(flag.Args())
 		params.Namespace = flag.Arg(0)
 		if flag.NArg() == 2 {
-			if params.Revision, err = strconv.Atoi(flag.Arg(1)); err != nil {
-				fmt.Printf("unable to parse revision: %v\n", err)
-				os.Exit(1)
+			if flag.Arg(1) == "zero" {
+				params.Zero = true
+			} else {
+				if params.VersionNo, err = strconv.Atoi(flag.Arg(1)); err != nil {
+					fmt.Printf("unable to parse revision: %v\n", err)
+					os.Exit(1)
+				}
 			}
 		}
 	}
@@ -121,10 +107,7 @@ func main() {
 	storage.ScanDirectory("migrations", collection)
 	collection.Register(newMigration)
 	collection.Register(newMigration2)
-	log.Debugf("Original collection")
-	printCollection(collection)
-	collection.Sort()
-	log.Debugf("Collection after sorting:")
+	log.Debugf("Collection")
 	printCollection(collection)
 	log.Debug("Performing migrations")
 	err = collection.Migrate(&params)

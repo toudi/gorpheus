@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/gobuffalo/fizz"
-	"github.com/jmoiron/sqlx"
 	log "github.com/sirupsen/logrus"
 	"github.com/toudi/gorpheus/v1/migration"
 )
@@ -16,15 +15,17 @@ type Migrations []migration.MigrationI
 type Collection struct {
 	Versions       Migrations
 	FizzTranslator fizz.Translator
-	SQLBindType    int
+	metadata       map[string]NamespaceMeta
+	applied        map[string]bool
 }
 
 var ErrNoSuchVersion = errors.New("no such migration")
 
 func Collection_init() *Collection {
 	return &Collection{
-		Versions:    make(Migrations, 0),
-		SQLBindType: sqlx.UNKNOWN,
+		Versions: make(Migrations, 0),
+		metadata: make(map[string]NamespaceMeta),
+		applied:  make(map[string]bool),
 	}
 }
 

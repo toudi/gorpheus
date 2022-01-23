@@ -3,7 +3,6 @@ package gorpheus
 import (
 	"fmt"
 	"log"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -11,27 +10,17 @@ import (
 	"github.com/toudi/gorpheus/v1/migration"
 )
 
+var operationDesc = map[uint8]string{
+	DirectionUp:   "applying",
+	DirectionDown: "unapplying",
+}
+
 func (c *Collection) Migrate(params *MigrationParams) error {
-	var operationDesc = map[uint8]string{
-		DirectionUp:   "applying",
-		DirectionDown: "unapplying",
-	}
+	var description string
 
 	var err error
-	var revision string
 	var db *sqlx.DB
-
-	sort.Sort(c.Versions)
-
-	// index of currently applied migration within revisions table
-	var currentIdx int = -1
-	// index of target migration (i.e. the one that user wants to migrate to) within revisions table
-	var targetIdx int
-	// how many revisions should we apply - that's just for the internal forloop
-	var numRevisionsToApply int
-	var directionMode = DirectionUp
-	// how much should the index change after each loop. that's +1 for migrating up, -1 for rolling back
-	var delta = 1
+	var breakpoint string
 
 	if db, err = c.connectToDb(params); err != nil {
 		log.Fatalf("unable to connect to the database: %v", err)
@@ -42,68 +31,67 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		log.Fatalf("cannot create migrations table: %v", err)
 	}
 
-	// let's start by looking up the indices and based on that detect whether we are migrating or
-	// rolling back.
+	// check which versions are applied in the database and index the existing collection
+	c.index(db)
 
-	if revision, err = c.retrieveCurrentRevision(db); err != nil {
-		fmt.Printf("cannot detect current revision: %v", err)
-		// we don't really have to do anything since go assigns zero by default
+	var direction = DirectionUp
+
+	migrationsToApply := make([]migration.MigrationI, 0)
+	for namespace, metadata := range c.metadata {
+		if params.Namespace != "" && namespace != params.Namespace {
+			continue
+		}
+		migrationsToApply = append(migrationsToApply, c.Versions[metadata.positionIndex[metadata.mostRecent]])
 	}
-	if revision != "" {
-		if currentIdx, err = c.FindMigration(revision); err != nil {
-			log.Fatalf("cannot calculate index of current revision in revisions table: %v", err)
+
+	if params.Namespace != "" {
+		namespaceMeta, exists := c.metadata[params.Namespace]
+		if !exists {
+			return fmt.Errorf("unknown namespace: %s", params.Namespace)
+		}
+		if params.VersionNo == -1 {
+			params.VersionNo = namespaceMeta.mostRecent - 1
+		} else if params.VersionNo == 0 {
+			if !params.Zero {
+				params.VersionNo = namespaceMeta.mostRecent
+			} else {
+				breakpoint = fmt.Sprintf("%s/unapply-all", params.Namespace)
+			}
+		}
+		var migrationIndex int
+
+		if breakpoint == "" {
+			migrationIndex, exists = namespaceMeta.positionIndex[params.VersionNo]
+			if !exists {
+				return fmt.Errorf("unknown version number: %d", params.VersionNo)
+			}
+			breakpoint = c.Versions[migrationIndex].Revision()
+		}
+		fmt.Printf("current = %v\n", namespaceMeta.current)
+		if params.VersionNo < c.metadata[params.Namespace].mostRecent && namespaceMeta.current != -1 {
+			direction = DirectionDown
+			if !params.Zero {
+				breakpoint = c.Versions[migrationIndex+1].Revision()
+			}
 		}
 	}
-	if targetIdx, err = c.FindMigrationWithNamespaceAndRevision(params.Namespace, params.Revision); err != nil {
-		log.Fatalf("cannot find target revision: %v", err)
-	}
-	if params.Zero {
-		targetIdx = -1
-	}
 
-	if currentIdx == targetIdx {
-		fmt.Printf("no migrations to apply.\n")
+	description = operationDesc[uint8(direction)]
+
+	err = Atomic(db, func(tx *sqlx.Tx) error {
+		for _, _migration := range migrationsToApply {
+			if _, err = c.performMigration(tx, _migration, direction, breakpoint); err != nil {
+				return fmt.Errorf("could not %s %s: %v", description[:len(description)-3], _migration.Revision(), err)
+			}
+		}
 		return nil
-	}
+	})
 
-	if targetIdx < currentIdx {
-		directionMode = DirectionDown
-		targetIdx += 1
-		delta = -1
-	} else {
-		currentIdx += 1
-	}
-
-	numRevisionsToApply = (currentIdx - targetIdx)
-	if numRevisionsToApply < 0 {
-		numRevisionsToApply = -numRevisionsToApply
-	}
-	numRevisionsToApply += 1
-
-	fmt.Printf("currentIdx=%d, targetIdx=%d\n", currentIdx, targetIdx)
-	fmt.Printf("%s %d migration(s)\n", operationDesc[uint8(directionMode)], numRevisionsToApply)
-
-	for i := 0; i < numRevisionsToApply; i++ {
-		err = nil
-		fmt.Printf("%s %s .. ", operationDesc[uint8(directionMode)], c.Versions[currentIdx].Revision())
-
-		if err = Atomic(db, func(tx *sqlx.Tx) error {
-			return c.performMigration(tx, currentIdx, directionMode)
-		}); err != nil {
-			log.Fatalf("unable to perform operation: %v", err)
-			break
-		}
-		fmt.Printf("[OK]\n")
-
-		currentIdx += delta
-	}
-
-	if params.Zero {
-		err = c.dropMigrationsTable(db)
+	if err != nil {
+		fmt.Printf("could not perform migrations: %v\n", err)
 	}
 
 	return err
-
 }
 
 func (c *Collection) FindMigration(version string) (int, error) {
@@ -145,38 +133,89 @@ func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, rev
 	return -1, ErrNoSuchVersion
 }
 
-func (c *Collection) performMigration(tx *sqlx.Tx, idx int, direction int) error {
+func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, breakpoint string) (bool, error) {
 	var script string
 	var scriptType uint8
 	var err error
+	var breakpointReached bool
+	var performAction bool = true
 
-	_migration := c.Versions[idx]
+	fmt.Printf("performMigration(%s, %d, %s)\n", _migration.Revision(), direction, breakpoint)
 
-	if direction == DirectionUp {
-		script, scriptType, err = _migration.UpScript()
-	} else {
-		script, scriptType, err = _migration.DownScript()
-	}
-
+	dependenciesArray, err := c.GetDependencies(_migration)
+	// fmt.Printf("result of getDependencies(%s): %v, %v\n", _migration.Revision(), dependenciesArray, err)
 	if err != nil {
-		return fmt.Errorf("unable to obtain migration script: %v", err)
+		return false, fmt.Errorf("could not parse dependencies of %s: %v", _migration.Revision(), err)
+	}
+	// if the direction is upwards then we apply the dependencies prior to applying the actual
+	// migration
+	if direction == DirectionUp {
+		for _, dependency := range dependenciesArray {
+			// fmt.Printf("call c.performMigration(%+v)\n", dependency)
+			if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint); breakpointReached || err != nil {
+				fmt.Printf("returning since breakpointReached=%v; err=%v\n", breakpointReached, err)
+				return breakpointReached, err
+			}
+		}
 	}
 
-	if scriptType == migration.TypeFizz {
-		if script, err = c.TranslatedSQL(script); err != nil {
-			return fmt.Errorf("cannot translate migration script: %v", err)
-		}
+	_, exists := c.applied[_migration.Revision()]
+
+	// basically, if we're migrating upwards and the migration was already applied then let's
+	// skip it.
+	// also, if we're migrating downwards and the migrations was not applied then there's no point
+	// in unapplying it.
+	if (direction == DirectionUp && exists) || (!exists && direction == DirectionDown) {
+		fmt.Printf("no-op\n")
+		performAction = false
 	}
-	if scriptType == migration.TypeGo {
-		err = _migration.Up(tx)
-	} else {
-		_, err = tx.Exec(script)
-	}
-	if err == nil {
+
+	if performAction {
+		fmt.Printf("%s %s\n", operationDesc[uint8(direction)], _migration.Revision())
+
 		if direction == DirectionUp {
-			return c.InsertRevision(tx, _migration.Revision())
+			script, scriptType, err = _migration.UpScript()
+		} else {
+			script, scriptType, err = _migration.DownScript()
 		}
-		return c.RemoveRevision(tx, _migration.Revision())
+
+		if err != nil {
+			return false, fmt.Errorf("unable to obtain migration script: %v", err)
+		}
+
+		if scriptType == migration.TypeFizz {
+			if script, err = c.TranslatedSQL(script); err != nil {
+				return false, fmt.Errorf("cannot translate migration script: %v", err)
+			}
+		}
+		if scriptType == migration.TypeGo {
+			err = _migration.Up(tx)
+		} else {
+			_, err = tx.Exec(script)
+		}
 	}
-	return err
+
+	if err == nil {
+		breakpointReached = _migration.Revision() == breakpoint
+		fmt.Printf("breakpointReached=%v\n", breakpointReached)
+		if direction == DirectionUp {
+			return breakpointReached, c.InsertRevision(tx, _migration.Revision())
+		}
+		// https://stackoverflow.com/questions/28058278/how-do-i-reverse-a-slice-in-go
+		for i, j := 0, len(dependenciesArray)-1; i < j; i, j = i+1, j-1 {
+			dependenciesArray[i], dependenciesArray[j] = dependenciesArray[j], dependenciesArray[i]
+		}
+		if !breakpointReached {
+			fmt.Printf("dependencies for %s => %v\n", _migration.Revision(), dependenciesArray)
+			for _, dependency := range dependenciesArray {
+				fmt.Printf("call c.performMigration(%+v)\n", dependency)
+				if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint); breakpointReached || err != nil {
+					fmt.Printf("returning since breakpointReached=%v; err=%v\n", breakpointReached, err)
+					return breakpointReached, err
+				}
+			}
+		}
+		return breakpointReached, c.RemoveRevision(tx, _migration.Revision())
+	}
+	return false, err
 }

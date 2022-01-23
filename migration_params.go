@@ -18,7 +18,7 @@ type MigrationParams struct {
 	Namespace string
 	// revision within namespace. A special value of -1 can be used to roll back the specified
 	// namespace by exactly 1 revision
-	Revision int
+	VersionNo int
 	// mode of operation - either Up (migrate) or Down (rollback)
 	Direction int
 }
