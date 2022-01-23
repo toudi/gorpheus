@@ -84,7 +84,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 
 	err = Atomic(db, func(tx *sqlx.Tx) error {
 		for _, _migration := range migrationsToApply {
-			if _, err = c.performMigration(tx, _migration, direction, breakpoint, 0); err != nil {
+			if _, err = c.performMigration(tx, _migration, direction, breakpoint, params.Fake, 0); err != nil {
 				return fmt.Errorf("could not %s %s: %v", description[:len(description)-3], _migration.Revision(), err)
 			}
 		}
@@ -137,7 +137,7 @@ func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, rev
 	return -1, ErrNoSuchVersion
 }
 
-func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, breakpoint string, indent int) (bool, error) {
+func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, breakpoint string, fake bool, indent int) (bool, error) {
 	var script string
 	var scriptType uint8
 	var err error
@@ -157,7 +157,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 		for _, dependency := range dependenciesArray {
 			if _, exists := c.applied[dependency.Revision()]; !exists {
 				// fmt.Printf("call c.performMigration(%+v)\n", dependency)
-				if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, indent+1); breakpointReached || err != nil {
+				if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, fake, indent+1); breakpointReached || err != nil {
 					fmt.Printf("%s returning since breakpointReached=%v; err=%v\n", strings.Repeat(" ", indent), breakpointReached, err)
 					return breakpointReached, err
 				}
@@ -177,7 +177,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 	}
 
 	if performAction {
-		fmt.Printf("%s %s %s\n", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.Revision())
+		fmt.Printf("%s %s %s .. ", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.Revision())
 
 		if direction == DirectionUp {
 			script, scriptType, err = _migration.UpScript()
@@ -194,14 +194,21 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 				return false, fmt.Errorf("cannot translate migration script: %v", err)
 			}
 		}
-		if scriptType == migration.TypeGo {
-			err = _migration.Up(tx)
-		} else {
-			_, err = tx.Exec(script)
+		if !fake {
+			if scriptType == migration.TypeGo {
+				err = _migration.Up(tx)
+			} else {
+				_, err = tx.Exec(script)
+			}
 		}
 	}
 
 	if err == nil {
+		if fake {
+			fmt.Printf("[ FAKED ]\n")
+		} else {
+			fmt.Printf("[ OK ]\n")
+		}
 		breakpointReached = _migration.Revision() == breakpoint
 		fmt.Printf("%s breakpointReached=%v\n", strings.Repeat(" ", indent), breakpointReached)
 		if direction == DirectionUp {
@@ -217,7 +224,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 					fmt.Printf("%s dependencies for %s => %v\n", strings.Repeat(" ", indent), _migration.Revision(), dependenciesArray)
 					for _, dependency := range dependenciesArray {
 						fmt.Printf("%s call c.performMigration(%+v)\n", strings.Repeat(" ", indent), dependency)
-						if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, indent+1); breakpointReached || err != nil {
+						if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, fake, indent+1); breakpointReached || err != nil {
 							fmt.Printf("%s returning since breakpointReached=%v; err=%v\n", strings.Repeat(" ", indent), breakpointReached, err)
 							return breakpointReached, err
 						}
@@ -225,6 +232,8 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 				}
 			}
 		}
+	} else {
+		fmt.Printf("[ ERROR ]\n")
 	}
 	return breakpointReached, err
 }
