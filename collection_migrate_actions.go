@@ -15,12 +15,102 @@ var operationDesc = map[uint8]string{
 	DirectionDown: "unapplying",
 }
 
+type migrationsArray []migration.MigrationI
+
+func (ma migrationsArray) Contains(_migration migration.MigrationI) bool {
+	for _, m := range ma {
+		if m.Revision() == _migration.Revision() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo int, targetVersionNo int, dst *migrationsArray) error {
+	fmt.Printf("prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
+	var err error
+	var delta int = 1
+
+	var versionNumber int
+
+	if currentVersionNo == targetVersionNo {
+		return nil
+	}
+
+	if currentVersionNo == -1 {
+		currentVersionNo = 1
+	}
+
+	var _migration migration.MigrationI
+
+	if targetVersionNo < currentVersionNo {
+		delta = -1
+	}
+
+	namespaceMeta := c.metadata[namespace]
+
+	for {
+		_migration = c.Versions[namespaceMeta.positionIndex[currentVersionNo]]
+		versionNumber, err = _migration.VersionNumber()
+		if err != nil {
+			return fmt.Errorf("could not get migration version number: %v", err)
+		}
+		if delta == -1 && versionNumber == targetVersionNo {
+			break
+		}
+
+		// let's check if this migration is already on the list to apply. if so - we can safely skip.
+		if !dst.Contains(_migration) {
+			if delta == -1 {
+				*dst = append(*dst, _migration)
+			}
+			dependencies, err := c.GetDependencies(_migration)
+			if err != nil {
+				return fmt.Errorf("could not get dependencies fro the migration: %v", err)
+			}
+			fmt.Printf("dependencies for %s: [", _migration.Revision())
+			for _, dependency := range dependencies {
+				fmt.Printf("%s, ", dependency.Revision())
+			}
+			fmt.Printf("]\n")
+			for _, dependency := range dependencies {
+				if dst.Contains(dependency) {
+					continue
+				}
+				fmt.Printf("dependencies loop\n")
+				dependencyNamespace := dependency.GetNamespace()
+				dependencyMeta := c.metadata[dependencyNamespace]
+				dependencyVersionNo, err := dependency.VersionNumber()
+				if err != nil {
+					return fmt.Errorf("could not get dependency version number: %v", err)
+				}
+				if dependencyNamespace == namespace && dependencyVersionNo == targetVersionNo {
+					continue
+				}
+				c.prepareMigrationsToApply(dependencyNamespace, dependencyMeta.current, dependencyVersionNo, dst)
+			}
+			fmt.Printf("namespace = %s; currentVersionNo = %d; targetVersionNo = %d\n", namespace, currentVersionNo, targetVersionNo)
+			if delta == 1 {
+				*dst = append(*dst, _migration)
+			}
+		}
+		if currentVersionNo == targetVersionNo {
+			break
+		}
+		currentVersionNo += delta
+		fmt.Printf("dst after append: %+v\n", dst)
+	}
+
+	return err
+}
+
 func (c *Collection) Migrate(params *MigrationParams) error {
 	var description string
 
 	var err error
 	var db *sqlx.DB
-	var breakpoint string
+	var currentVersionNo, targetVersionNo int
+	// var _migration migration.MigrationI
 
 	if db, err = c.connectToDb(params); err != nil {
 		log.Fatalf("unable to connect to the database: %v", err)
@@ -39,52 +129,44 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	c.index(db)
 
 	var direction = DirectionUp
+	if params.Namespace != "" {
+		namespaceMeta := c.metadata[params.Namespace]
+		if params.Zero || params.VersionNo < namespaceMeta.current {
+			direction = DirectionDown
+		}
+	}
 
-	migrationsToApply := make([]migration.MigrationI, 0)
+	migrationsToApply := make(migrationsArray, 0)
+
+	fmt.Printf("params: %+v\n", params)
+
 	for namespace, metadata := range c.metadata {
 		if params.Namespace != "" && namespace != params.Namespace {
 			continue
 		}
-		migrationsToApply = append(migrationsToApply, c.Versions[metadata.positionIndex[metadata.mostRecent]])
+		currentVersionNo = metadata.current
+		targetVersionNo = metadata.mostRecent
+		if params.Namespace != "" {
+			if params.Zero {
+				targetVersionNo = -1
+			} else if params.VersionNo > 0 {
+				targetVersionNo = params.VersionNo
+			}
+		}
+		fmt.Printf("call to prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
+		c.prepareMigrationsToApply(namespace, currentVersionNo, targetVersionNo, &migrationsToApply)
 	}
 
-	if params.Namespace != "" {
-		namespaceMeta, exists := c.metadata[params.Namespace]
-		if !exists {
-			return fmt.Errorf("unknown namespace: %s", params.Namespace)
-		}
-		if params.VersionNo == -1 {
-			params.VersionNo = namespaceMeta.mostRecent - 1
-		} else if params.VersionNo == 0 {
-			if !params.Zero {
-				params.VersionNo = namespaceMeta.mostRecent
-			} else {
-				breakpoint = c.Versions[namespaceMeta.positionIndex[1]].Revision()
-			}
-		}
-		var migrationIndex int
-
-		if breakpoint == "" {
-			migrationIndex, exists = namespaceMeta.positionIndex[params.VersionNo]
-			if !exists {
-				return fmt.Errorf("unknown version number: %d", params.VersionNo)
-			}
-			breakpoint = c.Versions[migrationIndex].Revision()
-		}
-		fmt.Printf("current = %v\n", namespaceMeta.current)
-		if params.VersionNo < c.metadata[params.Namespace].mostRecent && namespaceMeta.current != -1 {
-			direction = DirectionDown
-			if !params.Zero {
-				breakpoint = c.Versions[migrationIndex+1].Revision()
-			}
-		}
+	fmt.Printf("migrations to apply: \n")
+	for _, m := range migrationsToApply {
+		fmt.Printf("-> %s\n", m.Revision())
 	}
 
 	description = operationDesc[uint8(direction)]
 
 	err = Atomic(db, func(tx *sqlx.Tx) error {
 		for _, _migration := range migrationsToApply {
-			if _, err = c.performMigration(tx, _migration, direction, breakpoint, params.Fake, 0); err != nil {
+			if err = c.performMigration(tx, _migration, direction, params.Fake, 0); err != nil {
 				return fmt.Errorf("could not %s %s: %v", description[:len(description)-3], _migration.Revision(), err)
 			}
 		}
@@ -137,33 +219,13 @@ func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, rev
 	return -1, ErrNoSuchVersion
 }
 
-func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, breakpoint string, fake bool, indent int) (bool, error) {
+func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, fake bool, indent int) error {
 	var script string
 	var scriptType uint8
 	var err error
-	var breakpointReached bool
 	var performAction bool = true
 
-	fmt.Printf("%s performMigration(%s, %d, %s)\n", strings.Repeat(" ", indent), _migration.Revision(), direction, breakpoint)
-
-	dependenciesArray, err := c.GetDependencies(_migration)
-	// fmt.Printf("result of getDependencies(%s): %v, %v\n", _migration.Revision(), dependenciesArray, err)
-	if err != nil {
-		return false, fmt.Errorf("could not parse dependencies of %s: %v", _migration.Revision(), err)
-	}
-	// if the direction is upwards then we apply the dependencies prior to applying the actual
-	// migration
-	if direction == DirectionUp {
-		for _, dependency := range dependenciesArray {
-			if _, exists := c.applied[dependency.Revision()]; !exists {
-				// fmt.Printf("call c.performMigration(%+v)\n", dependency)
-				if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, fake, indent+1); breakpointReached || err != nil {
-					fmt.Printf("%s returning since breakpointReached=%v; err=%v\n", strings.Repeat(" ", indent), breakpointReached, err)
-					return breakpointReached, err
-				}
-			}
-		}
-	}
+	fmt.Printf("%s performMigration(%s, %d)\n", strings.Repeat(" ", indent), _migration.Revision(), direction)
 
 	_, exists := c.applied[_migration.Revision()]
 
@@ -186,12 +248,12 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 		}
 
 		if err != nil {
-			return false, fmt.Errorf("unable to obtain migration script: %v", err)
+			return fmt.Errorf("unable to obtain migration script: %v", err)
 		}
 
 		if scriptType == migration.TypeFizz {
 			if script, err = c.TranslatedSQL(script); err != nil {
-				return false, fmt.Errorf("cannot translate migration script: %v", err)
+				return fmt.Errorf("cannot translate migration script: %v", err)
 			}
 		}
 		if !fake {
@@ -209,31 +271,14 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 		} else {
 			fmt.Printf("[ OK ]\n")
 		}
-		breakpointReached = _migration.Revision() == breakpoint
-		fmt.Printf("%s breakpointReached=%v\n", strings.Repeat(" ", indent), breakpointReached)
+
 		if direction == DirectionUp {
 			err = c.InsertRevision(tx, _migration.Revision())
 		} else {
 			err = c.RemoveRevision(tx, _migration.Revision())
-			if err == nil {
-				if !breakpointReached {
-					// https://stackoverflow.com/questions/28058278/how-do-i-reverse-a-slice-in-go
-					for i, j := 0, len(dependenciesArray)-1; i < j; i, j = i+1, j-1 {
-						dependenciesArray[i], dependenciesArray[j] = dependenciesArray[j], dependenciesArray[i]
-					}
-					fmt.Printf("%s dependencies for %s => %v\n", strings.Repeat(" ", indent), _migration.Revision(), dependenciesArray)
-					for _, dependency := range dependenciesArray {
-						fmt.Printf("%s call c.performMigration(%+v)\n", strings.Repeat(" ", indent), dependency)
-						if breakpointReached, err = c.performMigration(tx, dependency, direction, breakpoint, fake, indent+1); breakpointReached || err != nil {
-							fmt.Printf("%s returning since breakpointReached=%v; err=%v\n", strings.Repeat(" ", indent), breakpointReached, err)
-							return breakpointReached, err
-						}
-					}
-				}
-			}
 		}
 	} else {
 		fmt.Printf("[ ERROR ]\n")
 	}
-	return breakpointReached, err
+	return err
 }

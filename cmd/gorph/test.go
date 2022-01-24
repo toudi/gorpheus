@@ -85,7 +85,9 @@ func main() {
 
 	flag.Parse()
 
-	if flag.NArg() > 1 {
+	fmt.Printf("narg=%v; args=%v\n", flag.NArg(), flag.Args())
+
+	if flag.NArg() > 0 {
 		fmt.Println(flag.NArg())
 		// that's a namespace and potentially a revision as well.
 		fmt.Println(flag.Args())
