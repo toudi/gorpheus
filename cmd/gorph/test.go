@@ -81,7 +81,7 @@ func main() {
 
 	flag.StringVar(&params.EnvKeyName, "env", "DATABASE_URL", "Environment variable that will contain database url")
 	flag.BoolVar(&params.Fake, "fake", false, "This option is only meaningful if combined with namespace and target revision. Then, if set, it pretends that a migration was applied.")
-	flag.BoolVar(&params.DropRevisionsTable, "vacuum", false, "If set, gorpheus will remove revisions table from the database; This option is mutually exclusive with migrations")
+	flag.BoolVar(&params.Vacuum, "vacuum", false, "If set, gorpheus will remove revisions table from the database; This option is mutually exclusive with migrations")
 
 	flag.Parse()
 

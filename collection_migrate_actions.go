@@ -26,6 +26,16 @@ func (ma migrationsArray) Contains(_migration migration.MigrationI) bool {
 	return false
 }
 
+func (ma migrationsArray) ToString() string {
+	output := "["
+	for _, m := range ma {
+		output += m.Revision() + ", "
+	}
+	output += "]"
+
+	return output
+}
+
 func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo int, targetVersionNo int, dst *migrationsArray) error {
 	fmt.Printf("prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
 	var err error
@@ -98,7 +108,7 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 			break
 		}
 		currentVersionNo += delta
-		fmt.Printf("dst after append: %+v\n", dst)
+		fmt.Printf("dst after append: %s\n", dst.ToString())
 	}
 
 	return err
@@ -121,14 +131,13 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		log.Fatalf("cannot create migrations table: %v", err)
 	}
 
-	if params.DropRevisionsTable {
-		return c.dropMigrationsTable(db)
-	}
-
 	// check which versions are applied in the database and index the existing collection
 	c.index(db)
 
 	var direction = DirectionUp
+	if params.Vacuum {
+		direction = DirectionDown
+	}
 	if params.Namespace != "" {
 		namespaceMeta := c.metadata[params.Namespace]
 		if params.Zero || params.VersionNo < namespaceMeta.current {
@@ -146,6 +155,9 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		}
 		currentVersionNo = metadata.current
 		targetVersionNo = metadata.mostRecent
+		if params.Vacuum {
+			targetVersionNo = -1
+		}
 		if params.Namespace != "" {
 			if params.Zero {
 				targetVersionNo = -1
@@ -172,6 +184,10 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 		}
 		return nil
 	})
+
+	if params.Vacuum {
+		err = c.dropMigrationsTable(db)
+	}
 
 	if err != nil {
 		fmt.Printf("could not perform migrations: %v\n", err)

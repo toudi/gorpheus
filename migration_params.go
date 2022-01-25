@@ -20,5 +20,5 @@ type MigrationParams struct {
 	// namespace by exactly 1 revision
 	VersionNo int
 	// if set, gorpheus will clean the migrations table from the database
-	DropRevisionsTable bool
+	Vacuum bool
 }
