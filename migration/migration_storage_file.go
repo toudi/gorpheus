@@ -2,7 +2,9 @@ package migration
 
 import (
 	"bufio"
+	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +21,8 @@ const sectionEnd = "-- end --"
 
 type FileMigration struct {
 	Migration
-	Path string
+	Path       string
+	EmbeddedFs *embed.FS
 }
 
 func (f *FileMigration) getType() uint8 {
@@ -31,10 +34,17 @@ func (f *FileMigration) extractSection(section string) (string, error) {
 	var line string
 	var buffer string
 	var parsing = false
+	var file fs.File
+	var err error
 
 	token := fmt.Sprintf(sectionBegin, section)
 
-	file, err := os.Open(f.Path)
+	if f.EmbeddedFs != nil {
+		file, err = f.EmbeddedFs.Open(f.Path)
+	} else {
+		file, err = os.Open(f.Path)
+	}
+
 	if err != nil {
 		log.Fatal(err)
 		return "", err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
 	"os"
@@ -14,9 +15,6 @@ import (
 	"github.com/toudi/gorpheus/v1/migration"
 	"github.com/toudi/gorpheus/v1/storage"
 )
-
-const cmdMigrate = "migrate"
-const cmdRollback = "rollback"
 
 func printCollection(c *gorpheus.Collection) {
 	for _, m := range c.Versions {
@@ -74,6 +72,9 @@ func (n2 *NewMigration2) Down(tx *sqlx.Tx) error {
 	return err
 }
 
+//go:embed migrations/*
+var embeddedMigrations embed.FS
+
 func main() {
 	var err error
 
@@ -108,6 +109,7 @@ func main() {
 	log.Debug("gorpheus started")
 	collection := gorpheus.Collection_init()
 	storage.ScanDirectory("migrations", collection)
+	storage.RegisterEmbedFS("embedded", &embeddedMigrations, collection)
 	collection.Register(newMigration)
 	collection.Register(newMigration2)
 	log.Debugf("Collection")
@@ -115,6 +117,7 @@ func main() {
 	log.Debug("Performing migrations")
 	err = collection.Migrate(&params)
 	//err := collection.MigrateUp(db)
+
 	if err != nil {
 		log.WithError(err).Error("Cannot perform migrations")
 	}

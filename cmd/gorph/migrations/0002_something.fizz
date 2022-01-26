@@ -1,0 +1,11 @@
+-- gorph DEPENDS 
+users/0001_create_users 
+-- end --
+-- gorph UP
+create_table("embedded_something") {
+    t.Column("id", "uuid", {primary: true})
+}
+-- end --
+-- gorph DOWN
+drop_table("embedded_something")
+-- end --
