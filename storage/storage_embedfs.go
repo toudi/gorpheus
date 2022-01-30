@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/toudi/gorpheus/v1"
-	"github.com/toudi/gorpheus/v1/migration"
+	"github.com/toudi/gorpheus"
+	"github.com/toudi/gorpheus/migration"
 )
 
 func RegisterEmbedFS(namespace string, f *embed.FS, target *gorpheus.Collection) error {

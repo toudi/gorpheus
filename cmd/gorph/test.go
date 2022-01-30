@@ -11,9 +11,9 @@ import (
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 	log "github.com/sirupsen/logrus"
-	"github.com/toudi/gorpheus/v1"
-	"github.com/toudi/gorpheus/v1/migration"
-	"github.com/toudi/gorpheus/v1/storage"
+	"github.com/toudi/gorpheus"
+	"github.com/toudi/gorpheus/migration"
+	"github.com/toudi/gorpheus/storage"
 )
 
 func printCollection(c *gorpheus.Collection) {

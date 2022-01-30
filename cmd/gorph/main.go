@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/toudi/gorpheus/v1"
+	"github.com/toudi/gorpheus"
 )
 
 func main() {

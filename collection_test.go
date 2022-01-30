@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/toudi/gorpheus/v1"
+	"github.com/toudi/gorpheus"
 )
 
 func migration_factory(version string, previous string, mtype uint8) gorpheus.Migration {

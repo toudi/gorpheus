@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/toudi/gorpheus/v1"
-	"github.com/toudi/gorpheus/v1/migration"
+	"github.com/toudi/gorpheus"
+	"github.com/toudi/gorpheus/migration"
 )
 
 func ScanDirectory(dir string, target *gorpheus.Collection) error {

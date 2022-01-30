@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/toudi/gorpheus/v1/migration"
+	"github.com/toudi/gorpheus/migration"
 )
 
 type NamespaceMeta struct {

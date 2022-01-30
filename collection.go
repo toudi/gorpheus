@@ -7,7 +7,7 @@ import (
 
 	"github.com/gobuffalo/fizz"
 	log "github.com/sirupsen/logrus"
-	"github.com/toudi/gorpheus/v1/migration"
+	"github.com/toudi/gorpheus/migration"
 )
 
 type Migrations []migration.MigrationI
