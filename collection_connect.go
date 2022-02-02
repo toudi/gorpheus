@@ -10,12 +10,15 @@ import (
 )
 
 func (c *Collection) connectToDb(params *MigrationParams) (*sqlx.DB, error) {
-	databaseUrl := os.Getenv(params.EnvKeyName)
-	if databaseUrl == "" {
-		return nil, fmt.Errorf("`%s` environment variable is empty", params.EnvKeyName)
+	var connectionURL string = params.ConnectionURL
+	if connectionURL == "" {
+		connectionURL = os.Getenv(params.EnvKeyName)
+		if connectionURL == "" {
+			return nil, fmt.Errorf("`%s` environment variable is empty", params.EnvKeyName)
+		}
 	}
 	// let's parse the database URL
-	url, err := dburl.Parse(databaseUrl)
+	url, err := dburl.Parse(connectionURL)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse database URL: %v", err)
 	}

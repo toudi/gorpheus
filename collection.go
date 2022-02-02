@@ -3,7 +3,6 @@ package gorpheus
 import (
 	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/gobuffalo/fizz"
 	log "github.com/sirupsen/logrus"
@@ -43,8 +42,4 @@ func (c *Collection) Register(m migration.MigrationI) {
 
 	m.SetDependencies()
 	c.Versions = append(c.Versions, m)
-}
-
-func (c *Collection) Sort() {
-	sort.Sort(c.Versions)
 }

@@ -11,6 +11,8 @@ type MigrationParams struct {
 	// when specified along with namespace and revision, the migrations utility will
 	// skip the actual migration method and only add revision entry to the control table
 	Fake bool
+	// connection URL for the database to connect to. If empty, gorpheus will try to use environment variable.
+	ConnectionURL string
 	// the environment variable that holds database URL. This defaults to DATABASE_URL
 	EnvKeyName string
 	// if specified, only migrations from the matching namespace will be applied

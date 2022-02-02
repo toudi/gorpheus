@@ -2,6 +2,8 @@ package storage
 
 import (
 	"embed"
+	"fmt"
+	"io"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -10,7 +12,11 @@ import (
 	"github.com/toudi/gorpheus/migration"
 )
 
-func RegisterEmbedFS(namespace string, f *embed.FS, target *gorpheus.Collection) error {
+type EmbedFsMigration struct {
+	migration.Migration
+}
+
+func RegisterEmbedFS(target *gorpheus.Collection, f *embed.FS, namespace string) error {
 	var ext string
 
 	fs.WalkDir(f, ".", func(path string, info fs.DirEntry, err error) error {
@@ -19,15 +25,20 @@ func RegisterEmbedFS(namespace string, f *embed.FS, target *gorpheus.Collection)
 
 			ext = strings.ToLower(filepath.Ext(path))
 
-			m := &migration.FileMigration{
-				Path: path,
-				Migration: migration.Migration{
-					Namespace: namespace,
-					Version:   strings.Replace(info.Name(), ext, "", 1),
-				},
-				EmbeddedFs: f,
+			// because reading from embed.FS is cheaper than reading from a real file we can
+			// parse the dependencies as we go which will speed up the indexing process.
+			reader, err := f.Open(path)
+			if err != nil {
+				return fmt.Errorf("could not open embed.FS file for reading: %v", err)
 			}
-			target.Register(m)
+
+			target.Register(&EmbedFsMigration{
+				Migration: migration.Migration{
+					Version: strings.Replace(namespace+"/"+info.Name(), ext, "", 1),
+					Type:    migration.TypeMappings[ext],
+					Reader:  reader.(io.ReadSeekCloser),
+				},
+			})
 		}
 		return nil
 	})

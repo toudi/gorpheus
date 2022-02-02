@@ -3,7 +3,6 @@ package gorpheus
 import (
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -19,7 +18,7 @@ type migrationsArray []migration.MigrationI
 
 func (ma migrationsArray) Contains(_migration migration.MigrationI) bool {
 	for _, m := range ma {
-		if m.Revision() == _migration.Revision() {
+		if m.GetVersion() == _migration.GetVersion() {
 			return true
 		}
 	}
@@ -29,7 +28,7 @@ func (ma migrationsArray) Contains(_migration migration.MigrationI) bool {
 func (ma migrationsArray) ToString() string {
 	output := "["
 	for _, m := range ma {
-		output += m.Revision() + ", "
+		output += m.GetVersion() + ", "
 	}
 	output += "]"
 
@@ -61,7 +60,7 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 
 	for {
 		_migration = c.Versions[namespaceMeta.positionIndex[currentVersionNo]]
-		versionNumber, err = _migration.VersionNumber()
+		versionNumber, err = _migration.GetVersionNumber()
 		if err != nil {
 			return fmt.Errorf("could not get migration version number: %v", err)
 		}
@@ -78,9 +77,9 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 			if err != nil {
 				return fmt.Errorf("could not get dependencies fro the migration: %v", err)
 			}
-			fmt.Printf("dependencies for %s: [", _migration.Revision())
+			fmt.Printf("dependencies for %s: [", _migration.GetVersion())
 			for _, dependency := range dependencies {
-				fmt.Printf("%s, ", dependency.Revision())
+				fmt.Printf("%s, ", dependency.GetVersion())
 			}
 			fmt.Printf("]\n")
 			for _, dependency := range dependencies {
@@ -88,9 +87,12 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 					continue
 				}
 				fmt.Printf("dependencies loop\n")
-				dependencyNamespace := dependency.GetNamespace()
+				dependencyNamespace, err := dependency.GetNamespace()
+				if err != nil {
+					return fmt.Errorf("could not parse namespace of %s: %v", dependency.GetVersion(), err)
+				}
 				dependencyMeta := c.metadata[dependencyNamespace]
-				dependencyVersionNo, err := dependency.VersionNumber()
+				dependencyVersionNo, err := dependency.GetVersionNumber()
 				if err != nil {
 					return fmt.Errorf("could not get dependency version number: %v", err)
 				}
@@ -132,7 +134,9 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	}
 
 	// check which versions are applied in the database and index the existing collection
-	c.index(db)
+	if err = c.index(db); err != nil {
+		return fmt.Errorf("could not index migrations: %v", err)
+	}
 
 	var direction = DirectionUp
 	if params.Vacuum {
@@ -171,7 +175,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 
 	fmt.Printf("migrations to apply: \n")
 	for _, m := range migrationsToApply {
-		fmt.Printf("-> %s\n", m.Revision())
+		fmt.Printf("-> %s\n", m.GetVersion())
 	}
 
 	description = operationDesc[uint8(direction)]
@@ -179,11 +183,19 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	err = Atomic(db, func(tx *sqlx.Tx) error {
 		for _, _migration := range migrationsToApply {
 			if err = c.performMigration(tx, _migration, direction, params.Fake, 0); err != nil {
-				return fmt.Errorf("could not %s %s: %v", description[:len(description)-3], _migration.Revision(), err)
+				return fmt.Errorf("could not %s %s: %v", description[:len(description)-3], _migration.GetVersion(), err)
 			}
 		}
 		return nil
 	})
+
+	// cleanup and close all the readers
+	for _, m := range c.Versions {
+		fmt.Printf("closing %s\n", m.GetVersion())
+		if err = m.Close(); err != nil {
+			return fmt.Errorf("could not close migration: %v", err)
+		}
+	}
 
 	if params.Vacuum {
 		err = c.dropMigrationsTable(db)
@@ -196,54 +208,15 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	return err
 }
 
-func (c *Collection) FindMigration(version string) (int, error) {
-	for idx, m := range c.Versions {
-		if strings.HasPrefix(m.Revision(), version) {
-			return idx, nil
-		}
-	}
-	return -1, ErrNoSuchVersion
-}
-
-func (c *Collection) FindMigrationWithNamespaceAndRevision(namespace string, revision int) (int, error) {
-	// if the namespace was not given then simply migrate to the latest available revision
-	if namespace == "" {
-		return len(c.Versions) - 1, nil
-	}
-	// this is a mode where we look for the specific revision within namespace
-	if revision > 0 {
-		for idx, m := range c.Versions {
-			revisionName := m.Revision()
-
-			if strings.HasPrefix(revisionName, namespace) {
-				// extract just the numeric part
-				underscoreIdx := strings.Index(revisionName, "_")
-				slashIdx := strings.Index(revisionName, "/")
-
-				versionNumberString := revisionName[slashIdx+1 : underscoreIdx]
-				versionNumber, err := strconv.Atoi(versionNumberString)
-				if err != nil {
-					return -1, fmt.Errorf("unable to parse the numeric revision: %v", err)
-				}
-				if versionNumber == revision {
-					return idx, nil
-				}
-			}
-		}
-	}
-
-	return -1, ErrNoSuchVersion
-}
-
 func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.MigrationI, direction int, fake bool, indent int) error {
 	var script string
 	var scriptType uint8
 	var err error
 	var performAction bool = true
 
-	fmt.Printf("%s performMigration(%s, %d)\n", strings.Repeat(" ", indent), _migration.Revision(), direction)
+	fmt.Printf("%s performMigration(%s, %d)\n", strings.Repeat(" ", indent), _migration.GetVersion(), direction)
 
-	_, exists := c.applied[_migration.Revision()]
+	_, exists := c.applied[_migration.GetVersion()]
 
 	// basically, if we're migrating upwards and the migration was already applied then let's
 	// skip it.
@@ -255,7 +228,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 	}
 
 	if performAction {
-		fmt.Printf("%s %s %s .. ", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.Revision())
+		fmt.Printf("%s %s %s .. ", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.GetVersion())
 
 		if direction == DirectionUp {
 			script, scriptType, err = _migration.UpScript()
@@ -267,11 +240,20 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 			return fmt.Errorf("unable to obtain migration script: %v", err)
 		}
 
+		if script == "" && _migration.GetType() != migration.TypeGo {
+			return fmt.Errorf("your migration is not a go migration yet it did not return any script. If you want to fake the migration, please use the fake parameter")
+		}
+
+		fmt.Printf("script prior to translation: %s\n", script)
+
 		if scriptType == migration.TypeFizz {
 			if script, err = c.TranslatedSQL(script); err != nil {
 				return fmt.Errorf("cannot translate migration script: %v", err)
 			}
 		}
+
+		fmt.Printf("script after translation: %s\n", script)
+
 		if !fake {
 			if scriptType == migration.TypeGo {
 				err = _migration.Up(tx)
@@ -289,9 +271,9 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 		}
 
 		if direction == DirectionUp {
-			err = c.InsertRevision(tx, _migration.Revision())
+			err = c.InsertRevision(tx, _migration.GetVersion())
 		} else {
-			err = c.RemoveRevision(tx, _migration.Revision())
+			err = c.RemoveRevision(tx, _migration.GetVersion())
 		}
 	} else {
 		fmt.Printf("[ ERROR ]\n")

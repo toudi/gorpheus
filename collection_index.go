@@ -37,9 +37,11 @@ func (c *Collection) index(db *sqlx.DB) error {
 	}
 
 	for collectionIndex, migration := range c.Versions {
-		namespace = migration.GetNamespace()
-		if versionNo, err = migration.VersionNumber(); err != nil {
-			return fmt.Errorf("could not get version number for %v: %v", migration.Revision(), err)
+		if namespace, err = migration.GetNamespace(); err != nil {
+			return fmt.Errorf("could not extract namespace for %v: %v", migration.GetVersion(), err)
+		}
+		if versionNo, err = migration.GetVersionNumber(); err != nil {
+			return fmt.Errorf("could not get version number for %v: %v", migration.GetVersion(), err)
 		}
 		if namespaceMeta, exists = c.metadata[namespace]; !exists {
 			namespaceMeta = NamespaceMeta{positionIndex: make(map[int]int), current: -1}
@@ -49,7 +51,7 @@ func (c *Collection) index(db *sqlx.DB) error {
 		if versionNo > namespaceMeta.mostRecent {
 			namespaceMeta.mostRecent = versionNo
 		}
-		if _, exists = c.applied[migration.Revision()]; exists && versionNo > namespaceMeta.current {
+		if _, exists = c.applied[migration.GetVersion()]; exists && versionNo > namespaceMeta.current {
 			namespaceMeta.current = versionNo
 		}
 
@@ -67,7 +69,7 @@ func (c *Collection) GetDependencies(_migration migration.MigrationI) ([]migrati
 	var err error
 	var namespace string
 
-	// fmt.Printf("getDependencies of %s\n", _migration.Revision())
+	// fmt.Printf("getDependencies of %s\n", _migration.GetVersion())
 	migrationDependencies := _migration.Dependencies()
 	dependencies := make([]migration.MigrationI, 0)
 	// fmt.Printf("dependencies: %+v\n", dependencies)
@@ -83,14 +85,18 @@ func (c *Collection) GetDependencies(_migration migration.MigrationI) ([]migrati
 		// fmt.Printf("dependecies array: %+v\n", dependencies)
 	}
 
-	versionNo, err = _migration.VersionNumber()
+	versionNo, err = _migration.GetVersionNumber()
 
 	if err != nil {
 		return nil, fmt.Errorf("could not detect version number of current migration: %v", err)
 	}
 
 	if versionNo > 1 {
-		dependencies = append(dependencies, c.Versions[c.metadata[_migration.GetNamespace()].positionIndex[versionNo-1]])
+		namespace, err = _migration.GetNamespace()
+		if err != nil {
+			return nil, fmt.Errorf("could not parse namespace from %s: %v", _migration.GetVersion(), err)
+		}
+		dependencies = append(dependencies, c.Versions[c.metadata[namespace].positionIndex[versionNo-1]])
 	}
 
 	return dependencies, nil

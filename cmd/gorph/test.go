@@ -18,7 +18,7 @@ import (
 
 func printCollection(c *gorpheus.Collection) {
 	for _, m := range c.Versions {
-		log.Debugf("-> %s", m.Revision())
+		log.Debugf("-> %s", m.GetVersion())
 	}
 }
 
@@ -32,9 +32,8 @@ type NewMigration2 struct {
 
 var newMigration = &NewMigration{
 	Migration: migration.Migration{
-		Version:   "0003_inmem",
-		Namespace: "users",
-		Depends:   []string{"users/0002_something"},
+		Version: "users/0003_inmem",
+		Depends: []string{"users/0002_something"},
 	},
 }
 
@@ -48,15 +47,13 @@ create_table("users_inmemory") {
 
 func (n *NewMigration) DownScript() (string, uint8, error) {
 	return `drop_table("users_inmemory")`, migration.TypeFizz, nil
-	//return `DROP TABLE "users_inmemory";`, migration.TypeSQL, nil
 }
 
 var newMigration2 = &NewMigration2{
 	GoMigration: migration.GoMigration{
 		Migration: migration.Migration{
-			Version:   "0004_inmem",
-			Namespace: "users",
-			Depends:   []string{"users/0003_inmem"},
+			Version: "users/0004_inmem",
+			Depends: []string{"users/0003_inmem"},
 		},
 	},
 }
@@ -108,8 +105,9 @@ func main() {
 	log.SetLevel(log.DebugLevel)
 	log.Debug("gorpheus started")
 	collection := gorpheus.Collection_init()
-	storage.ScanDirectory("migrations", collection)
-	storage.RegisterEmbedFS("embedded", &embeddedMigrations, collection)
+	storage.RegisterFSRecurse(collection, "migrations")
+	// storage.RegisterFS(collection, "migrations", "default")
+	storage.RegisterEmbedFS(collection, &embeddedMigrations, "embedded")
 	collection.Register(newMigration)
 	collection.Register(newMigration2)
 	log.Debugf("Collection")
