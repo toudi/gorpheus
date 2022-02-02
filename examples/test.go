@@ -69,7 +69,7 @@ func (n2 *NewMigration2) Down(tx *sqlx.Tx) error {
 	return err
 }
 
-//go:embed migrations/*
+//go:embed embedded/*
 var embeddedMigrations embed.FS
 
 func main() {
