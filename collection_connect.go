@@ -10,27 +10,44 @@ import (
 )
 
 func (c *Collection) connectToDb(params *MigrationParams) (*sqlx.DB, error) {
-	var connectionURL string = params.ConnectionURL
-	if connectionURL == "" {
-		connectionURL = os.Getenv(params.EnvKeyName)
+	var connectionURL string = params.Connection.ConnectionURL
+	var dbConn *sqlx.DB
+	var url *dburl.URL
+	var err error
+
+	fmt.Printf("parms: %+v\n", params)
+
+	if connectionURL == "" && params.Connection.Conn == nil {
+		connectionURL = os.Getenv(params.Connection.EnvKeyName)
 		if connectionURL == "" {
-			return nil, fmt.Errorf("`%s` environment variable is empty", params.EnvKeyName)
+			return nil, fmt.Errorf("`%s` environment variable is empty", params.Connection.EnvKeyName)
 		}
 	}
 	// let's parse the database URL
-	url, err := dburl.Parse(connectionURL)
+	url, err = dburl.Parse(connectionURL)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse database URL: %v", err)
 	}
+
+	if params.Connection.Conn != nil {
+		dbConn = sqlx.NewDb(params.Connection.Conn, url.Driver)
+	} else {
+		dbConn, err = sqlx.Open(url.Driver, url.DSN)
+	}
+
+	if url.Driver == "" {
+		return nil, fmt.Errorf("unable to detect database driver")
+	}
+
 	fmt.Printf("detected driver: %s", url.Driver)
 	switch url.Driver {
 	case "sqlite3":
-		c.SetTranslator(translators.NewSQLite(url.OriginalScheme))
+		c.SetTranslator(translators.NewSQLite(url.DSN))
 	case "postgres":
 		c.SetTranslator(translators.NewPostgres())
 	case "mysql":
-		c.SetTranslator(translators.NewMySQL(url.OriginalScheme, url.Path))
+		c.SetTranslator(translators.NewMySQL(url.DSN, url.Path))
 	default:
 	}
-	return sqlx.Open(url.Driver, url.DSN)
+	return dbConn, err
 }

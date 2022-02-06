@@ -1,9 +1,22 @@
 package gorpheus
 
+import "database/sql"
+
 const (
 	DirectionUp   = iota
 	DirectionDown = iota
 )
+
+type DbConnection struct {
+	// the environment variable that holds database URL. This defaults to DATABASE_URL
+	EnvKeyName string
+	// connection URL for the database to connect to. If empty, gorpheus will try to use environment variable.
+	// if not empty, gorpheus will parse the URL to extract the driver name and connect to the database
+	ConnectionURL string
+	// if you already have established the connection by yourself then you can specify it here. gorpheus will
+	// use it instead of creating a new one.
+	Conn *sql.DB
+}
 
 type MigrationParams struct {
 	// when specified, the migrations utility will roll back all of the migrations
@@ -11,10 +24,6 @@ type MigrationParams struct {
 	// when specified along with namespace and revision, the migrations utility will
 	// skip the actual migration method and only add revision entry to the control table
 	Fake bool
-	// connection URL for the database to connect to. If empty, gorpheus will try to use environment variable.
-	ConnectionURL string
-	// the environment variable that holds database URL. This defaults to DATABASE_URL
-	EnvKeyName string
 	// if specified, only migrations from the matching namespace will be applied
 	// (with dependencies)
 	Namespace string
@@ -23,4 +32,6 @@ type MigrationParams struct {
 	VersionNo int
 	// if set, gorpheus will clean the migrations table from the database
 	Vacuum bool
+	// if set, gorpheus will use this connection instead of relying on ConnectionURL / EnvKeyName
+	Connection DbConnection
 }
