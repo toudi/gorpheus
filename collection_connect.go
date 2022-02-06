@@ -15,8 +15,6 @@ func (c *Collection) connectToDb(params *MigrationParams) (*sqlx.DB, error) {
 	var url *dburl.URL
 	var err error
 
-	fmt.Printf("parms: %+v\n", params)
-
 	if connectionURL == "" && params.Connection.Conn == nil {
 		connectionURL = os.Getenv(params.Connection.EnvKeyName)
 		if connectionURL == "" {
@@ -39,7 +37,6 @@ func (c *Collection) connectToDb(params *MigrationParams) (*sqlx.DB, error) {
 		return nil, fmt.Errorf("unable to detect database driver")
 	}
 
-	fmt.Printf("detected driver: %s", url.Driver)
 	switch url.Driver {
 	case "sqlite3":
 		c.SetTranslator(translators.NewSQLite(url.DSN))

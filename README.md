@@ -209,25 +209,44 @@ c.Register(newMigration)
 This is where you inform gorpheus how you wish to proceed - whether you want to migrate only a single namespace, or all of them, or to which revision.
 
 ```go
-// in all of the examples you can either rely on a environment variable for database connection or specify the connectionURL in the parameters:
-var myParams = gorpheus.MigrationParams{
-	ConnectionURL: "sqlite://example.sqlite",
+// in all of the examples you need to specify how gorpheus should connect to your database. I am ignoring this part in all examples just for brevity
+// - you can rely on a environment variable for database connection:
+var myParams = &gorpheus.MigrationParams{
+	Connection: gorpheus.DbConnection{
+		EnvKeyName: "DATABASE_URL",
+	},
+	// ...
 }
-var myParams = gorpheus.MigratinoParams{
-	EnvKeyName: "DATABASE_URL",
+
+// - or you can specify the connection URL manually:
+var myParams = &gorpheus.MigrationParams{
+	Connection: gorpheus.DbConnection{
+		ConnectionURL: "sqlite://example.sqlite",
+	},
+	// ...
 }
-// I'm only skipping that for brevity
+// - or you can specify existing *sql.DB instance, however you still need to pass the connection URL so that fizz can register that.
+//   from what I could understand, fizz doesn't actually do anything with the original DSN, however I'm not sure of that
+var dsn = "database-driver-params"
+db, err := sql.Open("driver", dsn)
+var myParams = &gorpheus.MigrationParams{
+	Connection: gorpheus.DbConnection{
+		Conn: db,
+		ConnectionURL: dsn,
+	},
+	// ...
+}
 
 // this is the default action - gorpheus will apply all outstanding forward migrations
-var myParams = gorpheus.MigrationParams{}
+var myParams = &gorpheus.MigrationParams{}
 
 // this will migrate a single namespace to the latest version (including dependencies)
-var myParams = gorpheus.MigrationParams{
+var myParams = &gorpheus.MigrationParams{
 	Namespace: "users",
 }
 
 // this will migrate a single namespace to a version specified by number
-var myParams = gorpheus.MigrationParams{
+var myParams = &gorpheus.MigrationParams{
 	Namespace: "users",
 	VersionNo: 123,
 }
@@ -235,13 +254,13 @@ var myParams = gorpheus.MigrationParams{
 Please note that if the database will be already migrated to, say, version number 125 within this namespace then gorpheus will roll back the namespace instead
 
 // this will instruct gorpheus to roll back all migrations from the namespace "users"
-var myParams = gorpheus.MigrationParams{
+var myParams = &gorpheus.MigrationParams{
 	Namespace: "users",
 	Zero     : true,
 }
 
 // this will instruct gorpheus to roll back all migrations from all namespaces and destroy it's own state table
-var myParams = gorpheus.MigrationParams{
+var myParams = &gorpheus.MigrationParams{
 	Vaccuum: true,
 }
 
