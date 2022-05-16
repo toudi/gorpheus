@@ -59,8 +59,6 @@ func (c *Collection) index(db *sqlx.DB) error {
 
 	}
 
-	fmt.Printf("metadata: %+v\n", c.metadata)
-
 	return err
 }
 

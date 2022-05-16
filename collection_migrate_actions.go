@@ -2,7 +2,6 @@ package gorpheus
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -36,7 +35,8 @@ func (ma migrationsArray) ToString() string {
 }
 
 func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo int, targetVersionNo int, dst *migrationsArray) error {
-	fmt.Printf("prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
+	c.Log(LoggerDebug, LogLevelDebug, "prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
+
 	var err error
 	var delta int = 1
 
@@ -77,16 +77,18 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 			if err != nil {
 				return fmt.Errorf("could not get dependencies fro the migration: %v", err)
 			}
-			fmt.Printf("dependencies for %s: [", _migration.GetVersion())
+			c.Log(LogLevelDebug, LogLevelDebug, "dependencies for %s: [", _migration.GetVersion())
+
 			for _, dependency := range dependencies {
-				fmt.Printf("%s, ", dependency.GetVersion())
+				c.Log(LogLevelDebug, LogLevelDebug, "%s, ", dependency.GetVersion())
 			}
-			fmt.Printf("]\n")
+			c.Log(LogLevelDebug, LogLevelDebug, "]\n")
+
 			for _, dependency := range dependencies {
 				if dst.Contains(dependency) {
 					continue
 				}
-				fmt.Printf("dependencies loop\n")
+
 				dependencyNamespace, err := dependency.GetNamespace()
 				if err != nil {
 					return fmt.Errorf("could not parse namespace of %s: %v", dependency.GetVersion(), err)
@@ -101,7 +103,8 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 				}
 				c.prepareMigrationsToApply(dependencyNamespace, dependencyMeta.current, dependencyVersionNo, dst)
 			}
-			fmt.Printf("namespace = %s; currentVersionNo = %d; targetVersionNo = %d\n", namespace, currentVersionNo, targetVersionNo)
+			c.Log(LogLevelDebug, LogLevelDebug, "namespace = %s; currentVersionNo = %d; targetVersionNo = %d\n", namespace, currentVersionNo, targetVersionNo)
+
 			if delta == 1 {
 				*dst = append(*dst, _migration)
 			}
@@ -110,7 +113,6 @@ func (c *Collection) prepareMigrationsToApply(namespace string, currentVersionNo
 			break
 		}
 		currentVersionNo += delta
-		fmt.Printf("dst after append: %s\n", dst.ToString())
 	}
 
 	return err
@@ -125,12 +127,15 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	// var _migration migration.MigrationI
 
 	if db, err = c.connectToDb(params); err != nil {
-		log.Fatalf("unable to connect to the database: %v", err)
+		c.Log(LoggerGorpheus, LogLevelError, "unable to connect to the database: %v", err)
+		return err
 	}
 
-	fmt.Printf("making sure that migrations table exist\n")
+	c.Log(LoggerDebug, LogLevelDebug, "making sure that migrations table exist\n")
+
 	if err = c.ensureMigrationsTableExists(db); err != nil {
-		log.Fatalf("cannot create migrations table: %v", err)
+		c.Log(LoggerGorpheus, LogLevelError, "cannot create migrations table: %v", err)
+		return err
 	}
 
 	// check which versions are applied in the database and index the existing collection
@@ -151,7 +156,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 
 	migrationsToApply := make(migrationsArray, 0)
 
-	fmt.Printf("params: %+v\n", params)
+	c.Log(LoggerDebug, LogLevelDebug, "params: %+v", params)
 
 	for namespace, metadata := range c.metadata {
 		if params.Namespace != "" && namespace != params.Namespace {
@@ -169,13 +174,15 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 				targetVersionNo = params.VersionNo
 			}
 		}
-		fmt.Printf("call to prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
+		c.Log(LoggerDebug, LogLevelDebug, "call to prepareMigrationsToApply(%s, %d, %d)\n", namespace, currentVersionNo, targetVersionNo)
+
 		c.prepareMigrationsToApply(namespace, currentVersionNo, targetVersionNo, &migrationsToApply)
 	}
 
-	fmt.Printf("migrations to apply: \n")
+	c.Log(LoggerDebug, LogLevelDebug, "migrations to apply: \n")
+
 	for _, m := range migrationsToApply {
-		fmt.Printf("-> %s\n", m.GetVersion())
+		c.Log(LoggerDebug, LogLevelDebug, "-> %s\n", m.GetVersion())
 	}
 
 	description = operationDesc[uint8(direction)]
@@ -191,7 +198,8 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 
 	// cleanup and close all the readers
 	for _, m := range c.Versions {
-		fmt.Printf("closing %s\n", m.GetVersion())
+		c.Log(LoggerDebug, LogLevelDebug, "closing %s\n", m.GetVersion())
+
 		if err = m.Close(); err != nil {
 			return fmt.Errorf("could not close migration: %v", err)
 		}
@@ -202,7 +210,7 @@ func (c *Collection) Migrate(params *MigrationParams) error {
 	}
 
 	if err != nil {
-		fmt.Printf("could not perform migrations: %v\n", err)
+		c.Log(LoggerGorpheus, LogLevelError, "could not perform migrations: %v\n", err)
 	}
 
 	return err
@@ -214,7 +222,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 	var err error
 	var performAction bool = true
 
-	fmt.Printf("%s performMigration(%s, %d)\n", strings.Repeat(" ", indent), _migration.GetVersion(), direction)
+	c.Log(LoggerDebug, LogLevelDebug, "%s performMigration(%s, %d)\n", strings.Repeat(" ", indent), _migration.GetVersion(), direction)
 
 	_, exists := c.applied[_migration.GetVersion()]
 
@@ -223,12 +231,12 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 	// also, if we're migrating downwards and the migrations was not applied then there's no point
 	// in unapplying it.
 	if (direction == DirectionUp && exists) || (!exists && direction == DirectionDown) {
-		fmt.Printf("%s no-op\n", strings.Repeat(" ", indent))
+		c.Log(LoggerDebug, LogLevelDebug, "%s no-op\n", strings.Repeat(" ", indent))
 		performAction = false
 	}
 
 	if performAction {
-		fmt.Printf("%s %s %s .. ", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.GetVersion())
+		c.Log(LoggerGorpheus, LogLevelInfo, "%s %s %s .. ", strings.Repeat(" ", indent), operationDesc[uint8(direction)], _migration.GetVersion())
 
 		if direction == DirectionUp {
 			script, scriptType, err = _migration.UpScript()
@@ -244,7 +252,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 			return fmt.Errorf("your migration is not a go migration yet it did not return any script. If you want to fake the migration, please use the fake parameter")
 		}
 
-		fmt.Printf("script prior to translation: %s\n", script)
+		c.Log(LoggerSQL, LogLevelInfo, "script prior to translation: %s\n", script)
 
 		if scriptType == migration.TypeFizz {
 			if script, err = c.TranslatedSQL(script); err != nil {
@@ -252,7 +260,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 			}
 		}
 
-		fmt.Printf("script after translation: %s\n", script)
+		c.Log(LoggerSQL, LogLevelInfo, "script after translation: %s\n", script)
 
 		if !fake {
 			if scriptType == migration.TypeGo {
@@ -265,9 +273,9 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 
 	if err == nil {
 		if fake {
-			fmt.Printf("[ FAKED ]\n")
+			c.Log(LoggerGorpheus, LogLevelInfo, "[ FAKED ]\n")
 		} else {
-			fmt.Printf("[ OK ]\n")
+			c.Log(LoggerGorpheus, LogLevelInfo, "[ OK ]\n")
 		}
 
 		if direction == DirectionUp {
@@ -276,7 +284,7 @@ func (c *Collection) performMigration(tx *sqlx.Tx, _migration migration.Migratio
 			err = c.RemoveRevision(tx, _migration.GetVersion())
 		}
 	} else {
-		fmt.Printf("[ ERROR ]\n")
+		c.Log(LoggerGorpheus, LogLevelInfo, "[ ERROR ]\n")
 	}
 	return err
 }

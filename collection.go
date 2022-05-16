@@ -2,10 +2,8 @@ package gorpheus
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/gobuffalo/fizz"
-	log "github.com/sirupsen/logrus"
 	"github.com/toudi/gorpheus/migration"
 )
 
@@ -16,6 +14,7 @@ type Collection struct {
 	FizzTranslator fizz.Translator
 	metadata       map[string]NamespaceMeta
 	applied        map[string]bool
+	loggers        map[uint]Logger
 }
 
 var ErrNoSuchVersion = errors.New("no such migration")
@@ -25,11 +24,12 @@ func Collection_init() *Collection {
 		Versions: make(Migrations, 0),
 		metadata: make(map[string]NamespaceMeta),
 		applied:  make(map[string]bool),
+		loggers:  make(map[uint]Logger),
 	}
 }
 
 func (c *Collection) SetTranslator(translator fizz.Translator) {
-	fmt.Printf("set translator to %v", translator)
+	c.Log(LoggerGorpheus, LogLevelDebug, "set translator to %v", translator)
 	c.FizzTranslator = translator
 }
 
@@ -38,7 +38,7 @@ func (c *Collection) TranslatedSQL(sql string) (string, error) {
 }
 
 func (c *Collection) Register(m migration.MigrationI) {
-	log.Debugf("Registering migration: %+v", m)
+	c.Log(LoggerGorpheus, LogLevelDebug, "registering migration: %+v", m)
 
 	m.SetDependencies()
 	c.Versions = append(c.Versions, m)

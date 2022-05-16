@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	log "github.com/sirupsen/logrus"
 )
 
 const createFizz = `
@@ -28,7 +27,7 @@ func (c *Collection) ensureMigrationsTableExists(db *sqlx.DB) error {
 
 	err = db.Get(&result, "SELECT COUNT(1) FROM gorpheus_revisions")
 	if err != nil {
-		fmt.Printf("error detected: %v; trying to create revisions table\n", err)
+		c.Log(LoggerDebug, LogLevelDebug, "error detected: %v; trying to create revisions table\n", err)
 		tx, err = db.Beginx()
 		if err != nil {
 			return fmt.Errorf("could not initialize a transaction: %v", err)
@@ -45,7 +44,7 @@ func (c *Collection) createMigrationsTable(tx *sqlx.Tx) error {
 	createSQL, err := c.TranslatedSQL(createFizz)
 	fmt.Println(createSQL)
 	if err != nil {
-		log.WithError(err).Error("Cannot translate fizz migration")
+		c.Log(LoggerDebug, LogLevelError, "cannot translate fizz migration: %v", err)
 		return err
 	}
 	_, err = tx.Exec(createSQL)

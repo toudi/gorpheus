@@ -72,6 +72,20 @@ func (n2 *NewMigration2) Down(tx *sqlx.Tx) error {
 //go:embed embedded/*
 var embeddedMigrations embed.FS
 
+type Logger struct {
+	l *log.Logger
+}
+
+func (l *Logger) Info(format string, args ...interface{}) {
+	l.l.Infof(format, args...)
+}
+func (l *Logger) Debug(format string, args ...interface{}) {
+	l.l.Debugf(format, args)
+}
+func (l *Logger) Error(format string, args ...interface{}) {
+	l.l.Errorf(format, args)
+}
+
 func main() {
 	var err error
 
@@ -102,9 +116,14 @@ func main() {
 		}
 	}
 
-	log.SetLevel(log.DebugLevel)
-	log.Debug("gorpheus started")
+	logLogger := log.New()
+	logLogger.SetLevel(log.DebugLevel)
+	logLogger.Debug("gorpheus started")
+
+	logger := &Logger{l: logLogger}
+
 	collection := gorpheus.Collection_init()
+	collection.SetLogger(gorpheus.LoggerGorpheus, logger)
 	storage.RegisterFSRecurse(collection, "migrations")
 	// storage.RegisterFS(collection, "migrations", "default")
 	storage.RegisterEmbedFS(collection, &embeddedMigrations, "embedded")
