@@ -42,7 +42,7 @@ func (c *Collection) ensureMigrationsTableExists(db *sqlx.DB) error {
 
 func (c *Collection) createMigrationsTable(tx *sqlx.Tx) error {
 	createSQL, err := c.TranslatedSQL(createFizz)
-	fmt.Println(createSQL)
+	c.Log(LoggerSQL, LogLevelDebug, createSQL)
 	if err != nil {
 		c.Log(LoggerDebug, LogLevelError, "cannot translate fizz migration: %v", err)
 		return err
