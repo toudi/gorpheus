@@ -1,0 +1,19 @@
+depends: ["users/0003_create_index_on_email"]
+table: "books"
+operations:
+  - add-field:
+      fields:
+        owner:
+          {
+            "type": "integer",
+            "foreign-key":
+              {
+                "table": "users",
+                "column": "id",
+                "on-delete": "no-action",
+                "on-update": "cascade",
+              },
+            "null": True,
+          }
+  - add-constraint:
+      unique: ["title"]

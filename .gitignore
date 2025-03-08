@@ -1,2 +1,5 @@
-test
-*.sqlite3
+/gorpheus
+test.sqlite3
+cover.out
+cover.html
+

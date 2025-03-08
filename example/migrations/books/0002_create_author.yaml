@@ -1,0 +1,20 @@
+operations:
+  - create-table:
+      name: "authors"
+      fields:
+        id: { "type": integer, "primary-key": true }
+        first_name: { "type": "varchar", "max-length": 64 }
+        last_name: { "type": "varchar", "max-length": 64 }
+        full_name:
+          {
+            "type": "string",
+            "max-length": 64,
+            "generated":
+              {
+                "definition": "first_name || ' ' || last_name",
+                "stored": true,
+              },
+          }
+      indexes:
+        - name: "authors_last_name"
+          fields: ["last_name"]

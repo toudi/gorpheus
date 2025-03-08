@@ -1,0 +1,7 @@
+operations:
+  - create-table:
+      name: "users"
+      fields:
+        id: { "type": integer, "primary-key": true }
+        name: { "type": varchar, "max-length": 255 }
+        amount: { "type": decimal, "max-digits": 14, "decimal-places": 2 }

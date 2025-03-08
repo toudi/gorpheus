@@ -1,0 +1,15 @@
+depends: ["users/0001_create_user"]
+table: "users"
+operations:
+  - add-field:
+      fields:
+        email: { "type": varchar, "max-length": 255, "index": "unique" }
+  - alter-field:
+      name: "name"
+      field: { "max-length": 512 }
+  - add-field:
+      name: "a_column"
+      field: { "type": varchar, "max-length": 255, "null": True }
+  - alter-field:
+      name: "a_column"
+      field: { "max-length": 512, "null": False }

@@ -1,0 +1,6 @@
+operations:
+  - create-table:
+      name: "books"
+      fields:
+        id: { "type": integer, "primary-key": true }
+        title: { "type": varchar, "max-length": 255 }

@@ -1,0 +1,7 @@
+depends: ["users/0002_add_user_email"]
+table: "users"
+operations:
+  - create-index:
+      name: "users_email_idx"
+      unique: true
+      fields: ["email"]
