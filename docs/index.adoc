@@ -1,0 +1,28 @@
+= Gorpheus
+
+:toc: left
+:source-highlighter: rouge
+
+== What is the purpose of this project
+
+Gorpheus is a database migration utility. It was my intent to port migrations the way Django does them to the golang world. Some key aspects:
+
+* Migrations are database-agnostic
+* You only define migrations in one direction (forwards-only) and the tool automatically calculates reverse migrations
+* You can execute go code as a migration
+
+IMPORTANT: gorpheus does *not* create the database for you. The only exception from this rule is the SQLite3 backend, however in general you should first prepare the database and appropriate database user by yourself and then you can use gorpheus to deal with schema migrations.
+
+It should be noted that there are several existing migrations libraries, however the way I see it, they do have some limitations:
+
+* they are database-specific
+* they require the user to write SQL statements
+* they sometimes split backwards and forwards migrations into two separate files
+* they use timestamps for migrations versioning
+
+just to name a few.
+
+== How to use it?
+
+include::binary.adoc[]
+include::library.adoc[]

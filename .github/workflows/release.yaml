@@ -1,0 +1,76 @@
+on:
+  push:
+    # run only against tags
+    tags:
+      - "*"
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: tonynv/asciidoctor-action@master
+        with:
+          program: |
+            asciidoctor-pdf \
+            -o docs/gorpheus.pdf \
+            -a toc \
+            -a source-highlighter=rouge \
+            docs/index.adoc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gorpheus.pdf
+          path: docs/gorpheus.pdf
+
+  build:
+    name: build binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        os: [linux, darwin]
+        tags: [all, firebird, sqlite3, postgresql]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - run: mkdir dist
+      - run: go mod tidy
+        working-directory: cmd/gorpheus
+
+      - env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        working-directory: cmd/gorpheus
+        run: |
+          go build -tags=${{ matrix.tags }} \
+          -o ../../gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ matrix.arch }}
+          path: gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ matrix.arch }}
+
+  release:
+    needs: [build, build-documentation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gorpheus*
+          path: assets
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: assets/gorpheus*

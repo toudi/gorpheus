@@ -1,0 +1,194 @@
+:sourcedir: ../example/migrations
+
+=== Using as a command-line utility
+
+If you want to migrate your database, but not necesarily want to, or use go-based codebase then you can still use gorpheus to migrate your database schema. I have provided a command-line utility that takes migrations source directories and performs schema migrations. 
+
+NOTE: The command-line is provided in several build flavours:
+
+[cols="1,1"]
+|===
+| binary name | supported dialect
+
+| gorpheus-sqlite3 
+| SQLite3
+
+| gorpheus-postgres
+| PostgreSQL
+
+| gorpheus-firebird
+| FirebirdSQL
+
+| gorpheus-all
+| SQLite3, PostgreSQL, FirebirdSQL
+
+|===
+
+==== Migrating schema
+
+first of all, you have to prepare a `DATABASE_URL` environment variable. For instance:
+
+|===
+| dialect | example value
+
+| SQLite3
+| sqlite3://some-file.db
+
+| PostgreSQL
+| postgres://user:password@host:port/db-name
+
+| FirebirdSQL
+| fb://user:password@host/db-name
+
+|===
+
+Second of all, you need to preare directories with migrations. gorpheus treats each directory as a namespace. Here's an example structure from the provided example project:
+
+----
+migrations
+|-- books
+|   |-- 0001_create_book.yaml
+|   |-- 0002_create_author.yaml
+|   `-- 0003_user_foreign_key.yaml
+`-- users
+    |-- 0001_create_user.yaml
+    |-- 0002_add_user_email.yaml
+    `-- 0003_create_index_on_email.yaml
+----
+
+This way, gorheus will recognize two namespaces: `books` and `users`.
+
+Now you've got two commands at your disposal. Let's inspect them.
+
+===== `show` (shows migrations)
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus show -p migrations
+books
+[ ] 0001_create_book
+[ ] 0002_create_author
+[ ] 0003_user_foreign_key
+users
+[ ] 0001_create_user
+[ ] 0002_add_user_email
+[ ] 0003_create_index_on_email
+```
+
+This command does the following things:
+
+. discovers migrations from `migrations` directory
+. resolves dependencies
+. tries to find out which migrations have already been applied (if any)
+. displays an ordered list and marks the applied migrations with [x] sign.
+
+NOTE: you can show migrations from a single namespace by specifying it as a parameter, like so:
+
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus show -p migrations users
+
+===== `migrate` (applies schema migration)
+
+This command supports multiple operation modes. Let's start from the easiest one:
+
+====== apply all outstanding migrations
+
+In order to apply any outstanding migrations you don't specify any parameters, like so:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations
+Mar  8 00:28:09.561 INF applying namespace=books migration=0001_create_book
+Mar  8 00:28:09.562 INF applying namespace=books migration=0002_create_author
+Mar  8 00:28:09.563 INF applying namespace=users migration=0001_create_user
+Mar  8 00:28:09.563 INF applying namespace=users migration=0002_add_user_email
+Mar  8 00:28:09.565 INF applying namespace=users migration=0003_create_index_on_email
+Mar  8 00:28:09.565 INF applying namespace=books migration=0003_user_foreign_key
+```
+
+===== Migrating specific namespace
+
+It is possible to migrate a single namespace. In order to do this, just specify the name. Let's try this, shall we?
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations books
+```
+
+Hmm. No output. Why is this the case ? Let's inspect:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus show -p migrations books
+books
+[x] 0001_create_book
+[x] 0002_create_author
+[x] 0003_user_foreign_key
+```
+
+Aha! As you can see, all the migrations were already applied so there's nothing left to do.
+
+====== Migrating to a specific version
+
+This only makes sense within a context of a single namespace. Let's try to migrate `books` namespace to version `2` which will unapply the third migration:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations books 2
+Mar  8 00:38:32.225 INF unapplying namespace=books migration=0003_user_foreign_key
+```
+
+Now if you want to migrate `books` back to version `3` you can either do it by specifying version explicitely, like so:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations books 3
+```
+
+Or just omit the version altogether which will migrate `books` to the last available version:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations books
+```
+
+If you wish to unapply all migrations from within a namespace, please use `0` or `zero` as a version number, like so:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations books zero
+Mar  8 00:40:40.899 INF unapplying namespace=books migration=0002_create_author
+Mar  8 00:40:40.900 INF unapplying namespace=books migration=0001_create_book
+```
+
+==== Dependencies
+
+gorpheus parses your migration sources and calculates dependencies on the fly. What this means in practice is that even if you wish to migrate a specific namespace but you are using dependencies, the dependencies will be migrated first. Of course this works in reverse as well. Let's look at a specific example:
+
+[source, yaml]
+.books/0003_user_foreign_key.yaml
+----
+include::{sourcedir}/books/0003_user_foreign_key.yaml[]
+----
+
+Let's start from scratch and see how gorpheus will process this, shall we?
+
+```
+rm -f /tmp/test.sqlite
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations books 3
+Mar  8 00:44:36.325 INF applying namespace=books migration=0001_create_book
+Mar  8 00:44:36.326 INF applying namespace=books migration=0002_create_author
+Mar  8 00:44:36.327 INF applying namespace=users migration=0001_create_user
+Mar  8 00:44:36.327 INF applying namespace=users migration=0002_add_user_email
+Mar  8 00:44:36.329 INF applying namespace=users migration=0003_create_index_on_email
+Mar  8 00:44:36.329 INF applying namespace=books migration=0003_user_foreign_key
+```
+
+That wasn't anything special. But now notice what happens when we want to migrate `users` to version `2`:
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -p migrations users 2
+Mar  8 00:44:40.559 INF unapplying namespace=books migration=0003_user_foreign_key
+Mar  8 00:44:40.561 INF unapplying namespace=users migration=0003_create_index_on_email
+```
+
+You see? gorpheus realized that in order to migrate `users` to version `2` it first has to migrate `books` to version `2` since version `3` of `users` is a dependency of `books` version `2`!
+
+==== Verbose mode (displaying generated SQL)
+
+If you want to see the generated SQL code, please use `-vv` switch.
+
+```
+DATABASE_URL=sqlite3:///tmp/test.sqlite ./gorpheus migrate -vvv -p migrations users 2
+```
