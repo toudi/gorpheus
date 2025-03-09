@@ -57,6 +57,10 @@ func (p *Planner) PreparePlan(namespace string, version string) ([]*migration.Mi
 				if err != nil {
 					return nil, direction, err
 				}
+				if currentVersionFound && versionNum == currentVersion {
+					// namespace is already migrated to the expected version - no-op.
+					return nil, direction, nil
+				}
 				if currentVersionFound && versionNum < currentVersion {
 					// let's do a small trick. since the calculate path function appends
 					// dest node to the path, let's increment the "expected" version

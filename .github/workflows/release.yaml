@@ -3,15 +3,24 @@ on:
     # run only against tags
     tags:
       - "*"
-    branches:
-      - "**"
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - run: go test ./...
+
   build-documentation:
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +38,7 @@ jobs:
           path: docs/gorpheus.pdf
 
   build:
+    needs: [test]
     name: build binaries
     runs-on: ubuntu-latest
     strategy:
