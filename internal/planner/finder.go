@@ -16,6 +16,15 @@ func (p *Planner) isApplied(m *migration.Migration) bool {
 	}
 }
 
+func (p *Planner) findNextMigration(rev migration.Revision) (*migration.Migration, bool) {
+	currentIndex := p.lookupIndex[migration.LookupID(rev.Namespace, rev.Version)]
+	// if we're at the end of migrations graph then there's no way to move forward
+	if currentIndex < len(p.migrations)-1 {
+		return p.migrations[currentIndex+1], true
+	}
+	return nil, false
+}
+
 func (p *Planner) findMigration(namespace string, version int) (*migration.Migration, bool) {
 	if idx, exists := p.lookupIndex[migration.LookupID(namespace, version)]; exists {
 		return p.migrations[idx], true

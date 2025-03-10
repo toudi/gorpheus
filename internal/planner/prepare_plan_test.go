@@ -72,6 +72,15 @@ func TestPathCalculation(t *testing.T) {
 	}
 
 	t.Run("calculate path forwards", func(t *testing.T) {
+		t.Run("empty set", func(t *testing.T) {
+			t.Parallel()
+
+			planner := planner.New()
+			plan, _, err := planner.PreparePlan("", "")
+			require.NoError(t, err)
+			require.Nil(t, plan)
+		})
+
 		t.Run("no applied migrations", func(t *testing.T) {
 			t.Run("apply everything", func(t *testing.T) {
 				t.Parallel()
@@ -362,9 +371,11 @@ func TestPathCalculation(t *testing.T) {
 		t.Run("dependencies (books)", func(t *testing.T) {
 			t.Parallel()
 
+			// so basically books/0001_initial has a dependency of users/0003
+			// however this is not a conflict - we are not touching users namespace
+			// in this test and so it is safe to unapply just books namespace migrations.
 			var expected = []string{
 				"books/0002_add_author",
-				"users/0003_add_password",
 				"books/0001_initial",
 			}
 

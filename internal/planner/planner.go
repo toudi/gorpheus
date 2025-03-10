@@ -33,20 +33,15 @@ func WithMigrations(migrations []*migration.Migration) func(p *Planner) {
 
 		// this method is the one that actually creates a graph from the provided slice of input revisions.
 		slices.SortStableFunc(p.migrations, func(a, b *migration.Migration) int {
-			for _, dependency := range a.Dependencies {
-				// does *a* contain a dependency which happens to be *b* ?
-				if dependency == b.Revision {
-					// yes it does - let's push it to the top
-					// note that we're not returning -1 as it would push a to the top.
-					return 1
-				}
+			// pretty self explainatory - if a is a dependency of b then we need to return -1
+			// so that a is pushed to the top.
+			if a.IsDependencyOf(b) {
+				return -1
 			}
-			for _, dependency := range b.Dependencies {
-				// does *b* contain a dependency that happens to be *a* ?
-				if dependency == a.Revision {
-					// yes it does - we need to push a to the top.
-					return -1
-				}
+			// like above, but for b. if we're returning 1 here then we mean that a > b
+			// and thus b would be pushed to the top.
+			if b.IsDependencyOf(a) {
+				return 1
 			}
 			// fallback to comparing without dependencies
 			return a.Revision.Compare(b.Revision)
