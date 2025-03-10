@@ -3,12 +3,15 @@ on:
     # run only against tags
     tags:
       - "*"
+    branches:
+      - "**"
 
 permissions:
   contents: write
 
 jobs:
   test:
+    timeout-minutes: 2
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,13 +43,28 @@ jobs:
   build:
     needs: [test]
     name: build binaries
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]
-        os: [linux, darwin]
+        runner: [ubuntu-latest, macos-latest, macos-13]
         tags: [all, firebird, sqlite3, postgresql]
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: amd64
+          - runner: macos-latest
+            os: darwin
+            arch: arm64
+          - runner: macos-13
+            os: darwin
+            arch: amd64
+
+    runs-on: ${{ matrix.runner }}
     steps:
+      - name: Override arm64 -> m1
+        run: |
+          ARCH=$(echo ${{ matrix.arch }} | sed 's/arm64/m1/')
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
@@ -63,12 +81,12 @@ jobs:
         working-directory: cmd/gorpheus
         run: |
           go build -tags=${{ matrix.tags }} \
-          -o ../../gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ matrix.arch }}
+          -o ../../gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ env.ARCH }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ matrix.arch }}
-          path: gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ matrix.arch }}
+          name: gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ env.ARCH }}
+          path: gorpheus-${{ matrix.tags }}.${{ matrix.os }}.${{ env.ARCH }}
 
   release:
     needs: [build, build-documentation]
