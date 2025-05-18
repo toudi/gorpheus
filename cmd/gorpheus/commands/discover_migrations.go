@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -9,12 +11,11 @@ import (
 	"github.com/xo/dburl"
 )
 
-type migrationsDiscovery struct {
-	DatabaseURL    string   `name:"db" default:"DATABASE_URL" help:"Either a database url or name of an environment variable that contains one."`
-	MigrationsPath []string `name:"path" short:"p" type:"existingdir" help:"Add specified path(s) to collection." required:""`
+type databaseUrl struct {
+	DatabaseURL string `name:"db" default:"DATABASE_URL" help:"Either a database url or name of an environment variable that contains one."`
 }
 
-func (md *migrationsDiscovery) handleMigrationSources(ctx *Context) error {
+func (d *databaseUrl) handleDbUrl(ctx *Context) error {
 	// first, let's parse the database url.
 	var dbUrl *dburl.URL
 	var err error
@@ -22,10 +23,10 @@ func (md *migrationsDiscovery) handleMigrationSources(ctx *Context) error {
 	ctx.Logger.Log(interfaces.LogMessage{
 		Level:   slog.LevelDebug,
 		Message: "read database url from",
-		Payload: []any{slog.String("DatabaseURL", md.DatabaseURL)},
+		Payload: []any{slog.String("DatabaseURL", d.DatabaseURL)},
 	})
 
-	dbUrl, err = dburl.Parse(os.Getenv(md.DatabaseURL))
+	dbUrl, err = dburl.Parse(os.Getenv(d.DatabaseURL))
 
 	if err != nil {
 		ctx.Logger.Log(interfaces.LogMessage{
@@ -33,7 +34,7 @@ func (md *migrationsDiscovery) handleMigrationSources(ctx *Context) error {
 			Message: "reading database url from environment variable failed. trying to parse it as is."},
 		)
 		// maybe it's an actual url ?
-		dbUrl, err = dburl.Parse(md.DatabaseURL)
+		dbUrl, err = dburl.Parse(d.DatabaseURL)
 		if err != nil {
 			// there's not much that we can do.
 			ctx.Logger.Log(interfaces.LogMessage{
@@ -61,6 +62,23 @@ func (md *migrationsDiscovery) handleMigrationSources(ctx *Context) error {
 
 		return err
 	}
+
+	return nil
+}
+
+type migrationsDiscovery struct {
+	databaseUrl
+	MigrationsPath []string `name:"path" short:"p" type:"existingdir" help:"Add specified path(s) to collection." required:""`
+}
+
+func (md *migrationsDiscovery) handleMigrationSources(ctx *Context) error {
+	if err := md.handleDbUrl(ctx); err != nil {
+		return errors.Join(fmt.Errorf("error handling database url"), err)
+	}
+
+	gorpheus := ctx.Gorpheus
+
+	var err error
 
 	for _, path := range md.MigrationsPath {
 		ctx.Logger.Log(interfaces.LogMessage{

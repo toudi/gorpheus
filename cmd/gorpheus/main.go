@@ -16,9 +16,11 @@ import (
 )
 
 var CLI struct {
-	Verbosity int              `short:"v" type:"counter" help:"Set verbosity level"`
-	Migrate   commands.Migrate `cmd:"" help:"migrate database"`
-	Show      commands.Show    `cmd:"" help:"show applied migrations"`
+	Verbosity int               `short:"v" type:"counter" help:"Set verbosity level"`
+	Migrate   commands.Migrate  `cmd:"" help:"migrate database"`
+	Show      commands.Show     `cmd:"" help:"show applied migrations"`
+	Loaddata  commands.LoadData `cmd:"" help:"load data from fixture file into database"`
+	Dumpdata  commands.DumpData `cmd:"" help:"dump data from database to a fixture file"`
 }
 
 func main() {
