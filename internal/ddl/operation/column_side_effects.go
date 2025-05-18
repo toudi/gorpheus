@@ -55,5 +55,19 @@ func columnSideEffects(c *column.Column, tableName string) ([]Operation, error) 
 		})
 	}
 
+	if c.Check != nil {
+		sideEffects = append(sideEffects, Operation{
+			AddConstraint: &AddConstraint{
+				Table: tableName,
+				Null:  c.Null,
+				Constraint: &constraint.Constraint{
+					Name:  c.Name + "_chk",
+					Check: c.Check,
+				},
+				SideEffect: true,
+			},
+		})
+	}
+
 	return sideEffects, nil
 }

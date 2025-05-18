@@ -10,12 +10,14 @@ import (
 var (
 	ErrUnableToGenerateConstraintName = errors.New("unable to generate constraint name")
 	ErrUnableToParseUnique            = errors.New("unable to parse unique")
+	ErrUnableToValidateCheck          = errors.New("unable to validate check (test expression empty)")
 )
 
 type Constraint struct {
 	Name       string
 	ForeignKey *ForeignKey `yaml:"foreign-key"`
 	SrcUnique  any         `yaml:"unique"`
+	Check      *string     `yaml:"check"`
 	Unique     *Unique     `yaml:"-"`
 }
 
@@ -68,6 +70,12 @@ func (c *Constraint) Validate() error {
 			c.Name = c.ForeignKey.Table + "_" + strings.Join(c.ForeignKey.Columns, "_") + "_fkey"
 		} else {
 			return ErrUnableToGenerateConstraintName
+		}
+	}
+
+	if c.Check != nil {
+		if *c.Check == "" {
+			return ErrUnableToValidateCheck
 		}
 	}
 	return nil

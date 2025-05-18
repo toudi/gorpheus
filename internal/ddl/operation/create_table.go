@@ -42,5 +42,14 @@ func (ct *CreateTable) SideEffects() ([]Operation, error) {
 		}
 	}
 
+	// if there are any constraints, we have to validate them.
+	// this is because the unique constraint can specify multiple columns and
+	// then it's name and definition are generated dynamically.
+	for _, constraint := range ct.Constraints {
+		if err := constraint.Validate(); err != nil {
+			return nil, err
+		}
+	}
+
 	return sideEffects, nil
 }

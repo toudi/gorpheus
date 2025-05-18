@@ -23,12 +23,13 @@ type Column struct {
 
 	// these properties describe things that can be applied to
 	// any column
-	Null          *bool `yaml:"null"`
-	Default       any   `yaml:"default"`
-	Index         any   `yaml:"index"`  // either `true` or `unique`
-	Unique        *bool `yaml:"unique"` // unique constraint
-	AutoIncrement *bool `yaml:"auto-increment"`
-	PrimaryKey    *bool `yaml:"primary-key"`
+	Null          *bool   `yaml:"null"`
+	Default       any     `yaml:"default"`
+	Index         any     `yaml:"index"`  // either `true` or `unique`
+	Unique        *bool   `yaml:"unique"` // unique constraint
+	Check         *string `yaml:"check"`  // check constraint
+	AutoIncrement *bool   `yaml:"auto-increment"`
+	PrimaryKey    *bool   `yaml:"primary-key"`
 
 	// column type that will determine rest of the DDL
 	TypeAlias string `yaml:"type"` // string-specified alias
