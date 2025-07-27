@@ -1,8 +1,6 @@
 package planner
 
 import (
-	"slices"
-
 	"github.com/toudi/gorpheus/v2/interfaces"
 	"github.com/toudi/gorpheus/v2/internal/migration"
 )
@@ -29,24 +27,7 @@ func New(initializers ...func(p *Planner)) *Planner {
 
 func WithMigrations(migrations []*migration.Migration) func(p *Planner) {
 	return func(p *Planner) {
-		p.migrations = migrations
-
-		// this method is the one that actually creates a graph from the provided slice of input revisions.
-		slices.SortStableFunc(p.migrations, func(a, b *migration.Migration) int {
-			// pretty self explainatory - if a is a dependency of b then we need to return -1
-			// so that a is pushed to the top.
-			if a.IsDependencyOf(b) {
-				return -1
-			}
-			// like above, but for b. if we're returning 1 here then we mean that a > b
-			// and thus b would be pushed to the top.
-			if b.IsDependencyOf(a) {
-				return 1
-			}
-			// fallback to comparing without dependencies
-			return a.Revision.Compare(b.Revision)
-		})
-
+		p.migrations = sortMigrations(migrations)
 		// prepare the lookup index.
 		for idx, _migration := range p.migrations {
 			p.lookupIndex[migration.LookupID(_migration.Revision.Namespace, _migration.Revision.Version)] = idx

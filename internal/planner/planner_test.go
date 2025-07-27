@@ -82,14 +82,16 @@ func TestGraphConstructor(t *testing.T) {
 			}),
 		)
 
+		// the previous algorithm used to sort the namespaces alphabetically but
+		// with the new approach it doesn't really make sense
 		require.Equal(
 			t,
 			[]string{
-				"books/1",
-				"books/2",
 				"users/1",
 				"users/2",
 				"users/3",
+				"books/1",
+				"books/2",
 				"books/3",
 			},
 			lo.Map(planner.migrations, func(m *migration.Migration, _ int) string {

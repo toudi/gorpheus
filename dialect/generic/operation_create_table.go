@@ -69,6 +69,11 @@ func genericCreateTable(
 			buffer.WriteString(*constraint.Check)
 			buffer.WriteString(")")
 		}
+		if len(constraint.PrimaryKey) > 0 {
+			buffer.WriteString(" PRIMARY KEY (")
+			buffer.WriteString(strings.Join(constraint.PrimaryKey, ", "))
+			buffer.WriteString(")")
+		}
 		if i < len(ct.Constraints)-1 {
 			buffer.WriteString(",\n")
 		}

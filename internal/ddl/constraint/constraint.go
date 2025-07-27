@@ -15,6 +15,7 @@ var (
 
 type Constraint struct {
 	Name       string
+	PrimaryKey []string    `yaml:"primary-key"`
 	ForeignKey *ForeignKey `yaml:"foreign-key"`
 	SrcUnique  any         `yaml:"unique"`
 	Check      *string     `yaml:"check"`

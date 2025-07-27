@@ -34,22 +34,3 @@ func NumericVersion(name string) (version int, err error) {
 	}
 	return strconv.Atoi(nameParts[0])
 }
-
-func (m *Migration) IsDependencyOf(other *Migration) bool {
-	for _, d := range other.Dependencies {
-		if d.Namespace == m.Revision.Namespace {
-			// if a dependency has revision >= than `m` then by definition
-			// it must mean that m is a dependency of `other`.
-			// for instance, imagine that
-			// m is namespace/0001_initial
-			// and you're trying to establish if m could be a dependency of
-			// zzzz/0002_something where zzzz/0002_something has a dependency
-			// of namespace/0003_foo. Then because namespace/0003_foo has to
-			// be applied first then by definition namespace/0001_initial must
-			// also be applied first.
-			return d.Version >= m.Revision.Version
-		}
-	}
-
-	return false
-}
