@@ -37,5 +37,17 @@ func OperationDDL(
 	if operation.DropConstraint != nil {
 		return genericDropConstraint(operation.DropConstraint, buffer)
 	}
+	if operation.CreateView != nil {
+		return genericCreateView(operation.CreateView, buffer)
+	}
+	if operation.DropView != nil {
+		return genericDropView(operation.DropView, buffer)
+	}
+	if operation.CreateFunction != nil {
+		return genericCreateFunction(operation.CreateFunction, buffer)
+	}
+	if operation.DropFunction != nil {
+		return genericDropFunction(operation.DropFunction, buffer)
+	}
 	return fmt.Errorf("unhandled operation: %+v", operation)
 }

@@ -104,6 +104,19 @@ func (e *Executor) reverseOperation(input operation.Operation) (operation.Operat
 			Table:      input.AddConstraint.Table,
 			Constraint: input.AddConstraint.Constraint.Name,
 		}
+	} else if input.CreateView != nil {
+		reversed.DropView = &operation.DropView{
+			Name:         input.CreateView.Name,
+			Materialized: input.CreateView.Materialized,
+		}
+	} else if input.CreateFunction != nil {
+		functionName, err := input.CreateFunction.GetFunctionName()
+		if err != nil {
+			return reversed, err
+		}
+		reversed.DropFunction = &operation.DropFunction{
+			Name: functionName,
+		}
 	} else {
 		err = errors.New("unable to reverse operation")
 	}

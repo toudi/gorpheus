@@ -15,6 +15,10 @@ type Operation struct {
 	DropIndex          *DropIndex          `yaml:"drop-index"`
 	AddConstraint      *AddConstraint      `yaml:"add-constraint"`
 	DropConstraint     *DropConstraint     `yaml:"drop-constraint"`
+	CreateView         *CreateView         `yaml:"create-view"`
+	DropView           *DropView           `yaml:"drop-view"`
+	CreateFunction     *CreateFunction     `yaml:"create-function"`
+	DropFunction       *DropFunction       `yaml:"drop-function"`
 	RunStatement       *RunStatement       // meant for engine-specific tasks
 	RunCode            *RunCode            // meant for "data-like" migration. In other words, a custom code will be executed
 	AdjustTableVersion *AdjustTableVersion // internal type which is a consequence of operations unpacking.
